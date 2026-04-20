@@ -1,0 +1,183 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:FlowReveal.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
+        x:Class="FlowReveal.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="FlowReveal - HTTP/HTTPS 流量捕获工具"
+        Width="1200"
+        Height="800"
+        WindowStartupLocation="CenterScreen"
+        Background="#1E1E1E">
+
+  <Design.DataContext>
+    <vm:MainWindowViewModel/>
+  </Design.DataContext>
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <!-- 工具栏 -->
+    <Border Grid.Row="0" Background="#2D2D30" Padding="10">
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <Button Content="{Binding StartButtonText}"
+                Command="{Binding ToggleCaptureCommand}"
+                Background="#0E639C"
+                Foreground="White"
+                Padding="15,8"
+                FontSize="14"/>
+        
+        <Button Content="清除"
+                Command="{Binding ClearCommand}"
+                Background="#4A4A4A"
+                Foreground="White"
+                Padding="15,8"
+                FontSize="14"/>
+        
+        <Separator Width="1" Background="#555555" Margin="10,0"/>
+        
+        <TextBlock Text="{Binding StatusText}"
+                   VerticalAlignment="Center"
+                   Foreground="#CCCCCC"
+                   FontSize="14"/>
+        
+        <TextBlock Text=" | 捕获: "
+                   VerticalAlignment="Center"
+                   Foreground="#888888"
+                   FontSize="14"/>
+        
+        <TextBlock Text="{Binding PacketCount}"
+                   VerticalAlignment="Center"
+                   Foreground="#00D4AA"
+                   FontSize="14"
+                   FontWeight="Bold"/>
+        
+        <TextBlock Text=" 个数据包"
+                   VerticalAlignment="Center"
+                   Foreground="#888888"
+                   FontSize="14"/>
+      </StackPanel>
+    </Border>
+
+    <!-- 主内容区域 -->
+    <Grid Grid.Row="1" ColumnDefinitions="2*,*" Margin="10">
+      <!-- 流量列表 -->
+      <Border Grid.Column="0" Background="#252526" CornerRadius="5" Margin="0,0,5,0">
+        <Grid RowDefinitions="Auto,*">
+          <TextBlock Grid.Row="0" Text="捕获的流量" 
+                     Foreground="#CCCCCC" 
+                     FontSize="16" 
+                     FontWeight="SemiBold"
+                     Margin="10,10,10,5"/>
+          
+          <DataGrid Grid.Row="1"
+                    ItemsSource="{Binding Packets}"
+                    SelectedItem="{Binding SelectedPacket}"
+                    AutoGenerateColumns="False"
+                    IsReadOnly="True"
+                    CanUserReorderColumns="True"
+                    CanUserResizeColumns="True"
+                    GridLinesVisibility="Horizontal"
+                    HeadersVisibility="Column"
+                    Background="Transparent"
+                    RowBackground="#252526"
+                    Foreground="#CCCCCC"
+                    Margin="5">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="时间" Binding="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss.fff}'}" Width="100"/>
+              <DataGridTextColumn Header="协议" Binding="{Binding Protocol}" Width="70"/>
+              <DataGridTextColumn Header="源地址" Binding="{Binding SourceIp}" Width="140"/>
+              <DataGridTextColumn Header="源端口" Binding="{Binding SourcePort}" Width="80"/>
+              <DataGridTextColumn Header="目标地址" Binding="{Binding DestinationIp}" Width="140"/>
+              <DataGridTextColumn Header="目标端口" Binding="{Binding DestinationPort}" Width="80"/>
+              <DataGridTextColumn Header="大小" Binding="{Binding PacketSize}" Width="80"/>
+              <DataGridTextColumn Header="应用信息" Binding="{Binding ApplicationInfo}" Width="*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </Grid>
+      </Border>
+
+      <!-- 详情面板 -->
+      <Border Grid.Column="1" Background="#252526" CornerRadius="5" Margin="5,0,0,0">
+        <ScrollViewer>
+          <StackPanel Margin="10" Spacing="10">
+            <TextBlock Text="数据包详情" 
+                       Foreground="#CCCCCC" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"/>
+            
+            <Separator Background="#555555"/>
+            
+            <!-- 时间 -->
+            <StackPanel Spacing="2">
+              <TextBlock Text="时间" Foreground="#888888" FontSize="12"/>
+              <TextBlock Text="{Binding SelectedPacket.Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss.fff}'}" 
+                         Foreground="#CCCCCC" FontSize="14"/>
+            </StackPanel>
+            
+            <!-- 协议 -->
+            <StackPanel Spacing="2">
+              <TextBlock Text="协议" Foreground="#888888" FontSize="12"/>
+              <TextBlock Text="{Binding SelectedPacket.Protocol}" Foreground="#00D4AA" FontSize="14"/>
+            </StackPanel>
+            
+            <!-- 源地址 -->
+            <StackPanel Spacing="2">
+              <TextBlock Text="源地址" Foreground="#888888" FontSize="12"/>
+              <TextBlock Foreground="#CCCCCC" FontSize="14">
+                <Run Text="{Binding SelectedPacket.SourceIp}"/>:<Run Text="{Binding SelectedPacket.SourcePort}"/>
+              </TextBlock>
+            </StackPanel>
+            
+            <!-- 目标地址 -->
+            <StackPanel Spacing="2">
+              <TextBlock Text="目标地址" Foreground="#888888" FontSize="12"/>
+              <TextBlock Foreground="#CCCCCC" FontSize="14">
+                <Run Text="{Binding SelectedPacket.DestinationIp}"/>:<Run Text="{Binding SelectedPacket.DestinationPort}"/>
+              </TextBlock>
+            </StackPanel>
+            
+            <!-- 大小 -->
+            <StackPanel Spacing="2">
+              <TextBlock Text="数据包大小" Foreground="#888888" FontSize="12"/>
+              <TextBlock Foreground="#CCCCCC" FontSize="14">
+                <Run Text="{Binding SelectedPacket.PacketSize}"/> bytes
+              </TextBlock>
+            </StackPanel>
+            
+            <!-- 应用信息 -->
+            <StackPanel Spacing="2">
+              <TextBlock Text="应用信息" Foreground="#888888" FontSize="12"/>
+              <TextBlock Text="{Binding SelectedPacket.ApplicationInfo}" 
+                         Foreground="#CCCCCC" 
+                         FontSize="14"
+                         TextWrapping="Wrap"/>
+            </StackPanel>
+            
+            <Separator Background="#555555"/>
+            
+            <!-- 数据预览 -->
+            <TextBlock Text="数据预览 (十六进制)" 
+                       Foreground="#888888" 
+                       FontSize="12"/>
+            
+            <Border Background="#1E1E1E" CornerRadius="3" Padding="5">
+              <TextBlock Text="{Binding DataPreview}"
+                         Foreground="#00FF00"
+                         FontFamily="Consolas"
+                         FontSize="11"
+                         TextWrapping="Wrap"/>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+
+    <!-- 状态栏 -->
+    <Border Grid.Row="2" Background="#007ACC" Padding="10,5">
+      <TextBlock Text="{Binding StatusMessage}"
+                 Foreground="White"
+                 FontSize="12"/>
+    </Border>
+  </Grid>
+</Window>

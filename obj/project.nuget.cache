@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "dgSpecHash": "4lJWkxdO48c=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia\\11.2.1\\avalonia.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.angle.windows.natives\\2.1.22045.20230930\\avalonia.angle.windows.natives.2.1.22045.20230930.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.buildservices\\0.0.29\\avalonia.buildservices.0.0.29.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.controls.datagrid\\11.2.1\\avalonia.controls.datagrid.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.desktop\\11.2.1\\avalonia.desktop.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.freedesktop\\11.2.1\\avalonia.freedesktop.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.native\\11.2.1\\avalonia.native.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.remote.protocol\\11.2.1\\avalonia.remote.protocol.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.skia\\11.2.1\\avalonia.skia.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.themes.fluent\\11.2.1\\avalonia.themes.fluent.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.win32\\11.2.1\\avalonia.win32.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.x11\\11.2.1\\avalonia.x11.11.2.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\communitytoolkit.mvvm\\8.2.2\\communitytoolkit.mvvm.8.2.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\harfbuzzsharp\\7.3.0.2\\harfbuzzsharp.7.3.0.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\harfbuzzsharp.nativeassets.linux\\7.3.0.2\\harfbuzzsharp.nativeassets.linux.7.3.0.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\harfbuzzsharp.nativeassets.macos\\7.3.0.2\\harfbuzzsharp.nativeassets.macos.7.3.0.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\harfbuzzsharp.nativeassets.webassembly\\7.3.0.3-preview.2.2\\harfbuzzsharp.nativeassets.webassembly.7.3.0.3-preview.2.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\harfbuzzsharp.nativeassets.win32\\7.3.0.2\\harfbuzzsharp.nativeassets.win32.7.3.0.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\microcom.runtime\\0.11.0\\microcom.runtime.0.11.0.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\packetdotnet\\1.4.8\\packetdotnet.1.4.8.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\sharppcap\\6.3.1\\sharppcap.6.3.1.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\skiasharp\\2.88.8\\skiasharp.2.88.8.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.linux\\2.88.8\\skiasharp.nativeassets.linux.2.88.8.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.macos\\2.88.8\\skiasharp.nativeassets.macos.2.88.8.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.webassembly\\2.88.8\\skiasharp.nativeassets.webassembly.2.88.8.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.win32\\2.88.8\\skiasharp.nativeassets.win32.2.88.8.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\tmds.dbus.protocol\\0.20.0\\tmds.dbus.protocol.0.20.0.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "包 \"Tmds.DBus.Protocol\" 0.20.0 具有已知的 高 严重性漏洞，https://github.com/advisories/GHSA-xrw6-gwf8-vvr9",
+      "projectPath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+      "libraryId": "Tmds.DBus.Protocol",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}
