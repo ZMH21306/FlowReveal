@@ -1,256 +1,405 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Input;
+using FlowReveal.Core.Interfaces;
+using FlowReveal.Core.Models;
+using FlowReveal.Platforms.Windows.Network;
+using Microsoft.Extensions.Logging;
+using Avalonia;
 using Avalonia.Threading;
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
-using FlowReveal.Core.Capture;
-using FlowReveal.Models;
-using FlowReveal.Services;
 
 namespace FlowReveal.ViewModels
 {
-    public partial class MainWindowViewModel : ObservableObject, IDisposable
+    public partial class MainWindowViewModel : ViewModelBase
     {
-        private CaptureService? _captureService;
-        private CancellationTokenSource? _cts;
+        private readonly IPacketCaptureService _captureService;
+        private readonly IProtocolParser _protocolParser;
+        private readonly IFilterEngine _filterEngine;
+        private readonly NetworkAdapterManager _adapterManager;
+        private readonly ILogger<MainWindowViewModel> _logger;
 
-        [ObservableProperty]
-        private ObservableCollection<PacketInfo> _packets = new();
-
-        [ObservableProperty]
-        private PacketInfo? _selectedPacket;
-
-        [ObservableProperty]
-        private string _statusText = "已停止";
-
-        [ObservableProperty]
-        private string _statusMessage = "准备就绪";
-
-        [ObservableProperty]
-        private string _startButtonText = "开始捕获";
-
-        [ObservableProperty]
-        private int _packetCount;
-
-        [ObservableProperty]
-        private string _dataPreview = "";
+        public ObservableCollection<HttpConversation> Conversations { get; } = new();
+        public ObservableCollection<HttpConversation> FilteredConversations { get; } = new();
 
         private bool _isCapturing;
-
-        public MainWindowViewModel()
+        public bool IsCapturing
         {
-            _packetCount = 0;
-            _isCapturing = false;
+            get => _isCapturing;
+            set => SetProperty(ref _isCapturing, value);
         }
 
-        partial void OnSelectedPacketChanged(PacketInfo? value)
+        private string _statusText = "Ready";
+        public string StatusText
         {
-            if (value != null)
-            {
-                DataPreview = GenerateDataPreview(value);
-            }
-            else
-            {
-                DataPreview = "";
-            }
+            get => _statusText;
+            set => SetProperty(ref _statusText, value);
         }
 
-        [RelayCommand]
-        private void ToggleCapture()
+        private string _statisticsText = "Packets: 0 | Bytes: 0";
+        public string StatisticsText
         {
-            if (_isCapturing)
-            {
-                StopCapture();
-            }
-            else
-            {
-                StartCapture();
-            }
+            get => _statisticsText;
+            set => SetProperty(ref _statisticsText, value);
         }
 
-        [RelayCommand]
-        private void Clear()
+        private string _conversationCountText = "Conversations: 0";
+        public string ConversationCountText
         {
-            Packets.Clear();
-            PacketCount = 0;
-            SelectedPacket = null;
-            StatusMessage = "已清除捕获数据";
+            get => _conversationCountText;
+            set => SetProperty(ref _conversationCountText, value);
         }
 
-        private void StartCapture()
+        private string _memoryUsageText = "";
+        public string MemoryUsageText
         {
-            try
-            {
-                _captureService = new CaptureService();
-                _cts = new CancellationTokenSource();
-
-                _captureService.PacketCaptured += OnPacketCaptured;
-                _captureService.HttpMessageCaptured += OnHttpMessageCaptured;
-
-                _captureService.Start();
-
-                _isCapturing = true;
-                StatusText = "正在捕获...";
-                StartButtonText = "停止捕获";
-                StatusMessage = "正在捕获网络流量...";
-
-                Task.Run(() => MonitorCapture(_cts.Token));
-            }
-            catch (Exception ex)
-            {
-                StatusMessage = $"启动失败: {ex.Message}";
-                StatusText = "错误";
-            }
+            get => _memoryUsageText;
+            set => SetProperty(ref _memoryUsageText, value);
         }
 
-        private void StopCapture()
+        private string _filterText = "";
+        public string FilterText
         {
-            try
-            {
-                _cts?.Cancel();
-                _captureService?.Stop();
-                _captureService?.Dispose();
-
-                _isCapturing = false;
-                StatusText = "已停止";
-                StartButtonText = "开始捕获";
-                StatusMessage = $"捕获已停止，共捕获 {PacketCount} 个数据包";
-            }
-            catch (Exception ex)
-            {
-                StatusMessage = $"停止失败: {ex.Message}";
-            }
+            get => _filterText;
+            set => SetProperty(ref _filterText, value);
         }
 
-        private async Task MonitorCapture(CancellationToken cancellationToken)
+        private HttpConversation? _selectedConversation;
+        public HttpConversation? SelectedConversation
         {
-            while (!cancellationToken.IsCancellationRequested && _isCapturing)
+            get => _selectedConversation;
+            set
             {
-                await Task.Delay(1000, cancellationToken);
-            }
-        }
-
-        private void OnPacketCaptured(object? sender, PacketInfo packet)
-        {
-            if (packet == null) return;
-
-            try
-            {
-                Dispatcher.UIThread.Post(() =>
+                if (SetProperty(ref _selectedConversation, value))
                 {
-                    Packets.Add(packet);
-                    PacketCount = Packets.Count;
-
-                    if (PacketCount % 100 == 0)
-                    {
-                        StatusMessage = $"已捕获 {PacketCount} 个数据包...";
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"处理数据包失败: {ex.Message}");
+                    UpdateDetailPanel();
+                }
             }
         }
 
-        private void OnHttpMessageCaptured(object? sender, HttpMessage message)
+        private int _selectedDetailTab;
+        public int SelectedDetailTab
         {
-            if (message == null) return;
-
-            try
-            {
-                Dispatcher.UIThread.Post(() =>
-                {
-                    StatusMessage = message.IsRequest
-                        ? $"HTTP 请求: {message.Method} {message.Url}"
-                        : $"HTTP 响应: {message.StatusCode} {message.StatusMessage}";
-                });
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"处理 HTTP 消息失败: {ex.Message}");
-            }
+            get => _selectedDetailTab;
+            set => SetProperty(ref _selectedDetailTab, value);
         }
 
-        private string GenerateDataPreview(PacketInfo packet)
+        private string _requestHeadersText = "";
+        public string RequestHeadersText
         {
-            if (packet.Data == null || packet.Data.Length == 0)
-                return "无数据";
+            get => _requestHeadersText;
+            set => SetProperty(ref _requestHeadersText, value);
+        }
 
+        private string _requestBodyText = "";
+        public string RequestBodyText
+        {
+            get => _requestBodyText;
+            set => SetProperty(ref _requestBodyText, value);
+        }
+
+        private string _responseHeadersText = "";
+        public string ResponseHeadersText
+        {
+            get => _responseHeadersText;
+            set => SetProperty(ref _responseHeadersText, value);
+        }
+
+        private string _responseBodyText = "";
+        public string ResponseBodyText
+        {
+            get => _responseBodyText;
+            set => SetProperty(ref _responseBodyText, value);
+        }
+
+        private string _timingText = "";
+        public string TimingText
+        {
+            get => _timingText;
+            set => SetProperty(ref _timingText, value);
+        }
+
+        public ICommand StartCaptureCommand { get; }
+        public ICommand StopCaptureCommand { get; }
+        public ICommand ClearCommand { get; }
+        public ICommand ApplyFilterCommand { get; }
+        public ICommand ClearFilterCommand { get; }
+
+        public MainWindowViewModel(
+            IPacketCaptureService captureService,
+            IProtocolParser protocolParser,
+            IFilterEngine filterEngine,
+            NetworkAdapterManager adapterManager,
+            ILogger<MainWindowViewModel> logger)
+        {
+            _captureService = captureService;
+            _protocolParser = protocolParser;
+            _filterEngine = filterEngine;
+            _adapterManager = adapterManager;
+            _logger = logger;
+
+            StartCaptureCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteStartCapture);
+            StopCaptureCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteStopCapture);
+            ClearCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteClear);
+            ApplyFilterCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteApplyFilter);
+            ClearFilterCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteClearFilter);
+
+            _captureService.StatusChanged += OnCaptureStatusChanged;
+            _captureService.StatisticsUpdated += OnStatisticsUpdated;
+            _captureService.PacketCaptured += OnPacketCaptured;
+            _protocolParser.ConversationCreated += OnConversationCreated;
+            _protocolParser.ConversationUpdated += OnConversationUpdated;
+
+            _logger.LogInformation("MainWindowViewModel initialized");
+        }
+
+        private async void ExecuteStartCapture()
+        {
             try
             {
-                var sb = new StringBuilder();
-                int dataStart = 14; // 以太网头部
+                var adapters = _adapterManager.RefreshAdapters();
+                var adapter = _adapterManager.GetBestAdapter();
 
-                // 解析 IP 头部长度
-                if (packet.Data.Length >= 14 + 1)
+                if (adapter == null)
                 {
-                    byte ipHeaderLength = (byte)((packet.Data[14] & 0x0F) * 4);
-                    dataStart += ipHeaderLength;
-
-                    // 解析传输层头部长度
-                    if (packet.Protocol == ProtocolType.TCP && packet.Data.Length >= dataStart + 12)
-                    {
-                        byte tcpHeaderLength = (byte)((packet.Data[dataStart + 12] >> 4) * 4);
-                        dataStart += tcpHeaderLength;
-                    }
-                    else if (packet.Protocol == ProtocolType.UDP && packet.Data.Length >= dataStart + 8)
-                    {
-                        dataStart += 8;
-                    }
+                    StatusText = "No network adapter available";
+                    _logger.LogWarning("No network adapter available for capture");
+                    return;
                 }
 
-                // 显示数据预览
-                if (dataStart < packet.Data.Length)
+                _logger.LogInformation("Starting capture on adapter: {AdapterName}", adapter.FriendlyName);
+                await _captureService.StartCaptureAsync(adapter);
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Error: {ex.Message}";
+                _logger.LogError(ex, "Failed to start capture");
+            }
+        }
+
+        private async void ExecuteStopCapture()
+        {
+            try
+            {
+                await _captureService.StopCaptureAsync();
+                _logger.LogInformation("Capture stopped by user");
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Error: {ex.Message}";
+                _logger.LogError(ex, "Failed to stop capture");
+            }
+        }
+
+        private void ExecuteClear()
+        {
+            Conversations.Clear();
+            FilteredConversations.Clear();
+            _protocolParser.Clear();
+            SelectedConversation = null;
+            UpdateDetailPanel();
+            ConversationCountText = "Conversations: 0";
+            _logger.LogInformation("Conversations cleared");
+        }
+
+        private void ExecuteApplyFilter()
+        {
+            if (string.IsNullOrWhiteSpace(FilterText))
+            {
+                ExecuteClearFilter();
+                return;
+            }
+
+            var filter = ParseFilterText(FilterText);
+            _filterEngine.SetFilter(filter);
+            ApplyCurrentFilter();
+            _logger.LogInformation("Filter applied: {Filter}", FilterText);
+        }
+
+        private void ExecuteClearFilter()
+        {
+            _filterEngine.ClearFilter();
+            FilterText = "";
+            ApplyCurrentFilter();
+        }
+
+        private FilterGroup ParseFilterText(string text)
+        {
+            var group = new FilterGroup { LogicalOperator = "AND" };
+
+            var parts = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                if (part.Contains(':'))
                 {
-                    int dataLength = packet.Data.Length - dataStart;
-                    int previewLength = Math.Min(dataLength, 256);
-                    byte[] data = new byte[previewLength];
-                    Array.Copy(packet.Data, dataStart, data, 0, previewLength);
-
-                    for (int i = 0; i < previewLength; i += 16)
+                    var colonIndex = part.IndexOf(':');
+                    var field = part.Substring(0, colonIndex);
+                    var value = part.Substring(colonIndex + 1);
+                    group.Conditions.Add(new FilterCondition
                     {
-                        int lineLength = Math.Min(16, previewLength - i);
-                        StringBuilder hexLine = new StringBuilder();
-                        StringBuilder asciiLine = new StringBuilder();
-
-                        for (int j = 0; j < lineLength; j++)
-                        {
-                            byte b = data[i + j];
-                            hexLine.Append($"{b:X2} ");
-                            asciiLine.Append((b >= 32 && b <= 126) ? (char)b : '.');
-                        }
-
-                        hexLine.Append(new string(' ', (16 - lineLength) * 3));
-                        sb.AppendLine($"{hexLine}  {asciiLine}");
-                    }
-
-                    if (dataLength > previewLength)
-                    {
-                        sb.AppendLine($"... (truncated, total {dataLength} bytes)");
-                    }
+                        Field = field,
+                        Operator = "CONTAINS",
+                        Value = value
+                    });
                 }
                 else
                 {
-                    sb.AppendLine("No payload");
+                    group.Conditions.Add(new FilterCondition
+                    {
+                        Field = "url",
+                        Operator = "CONTAINS",
+                        Value = part
+                    });
                 }
+            }
 
-                return sb.ToString();
-            }
-            catch (Exception ex)
-            {
-                return $"Error: {ex.Message}";
-            }
+            return group;
         }
 
-        public void Dispose()
+        private void ApplyCurrentFilter()
         {
-            StopCapture();
-            _cts?.Dispose();
+            FilteredConversations.Clear();
+            foreach (var conv in Conversations)
+            {
+                if (_filterEngine.Matches(conv))
+                {
+                    FilteredConversations.Add(conv);
+                }
+            }
+            ConversationCountText = $"Conversations: {FilteredConversations.Count}/{Conversations.Count}";
+        }
+
+        private void OnCaptureStatusChanged(object? sender, string status)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                StatusText = status;
+            });
+            _logger.LogInformation("Capture status changed: {Status}", status);
+        }
+
+        private void OnPacketCaptured(object? sender, RawPacket packet)
+        {
+            _protocolParser.ProcessPacket(packet);
+        }
+
+        private void OnStatisticsUpdated(object? sender, CaptureStatistics stats)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                StatisticsText = $"Packets: {stats.TotalPacketsCaptured} | Bytes: {stats.TotalBytesCaptured:N0} | Rate: {stats.PacketsPerSecond:F1} pkt/s";
+            });
+        }
+
+        private void OnConversationCreated(object? sender, HttpConversation conversation)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                Conversations.Add(conversation);
+                if (_filterEngine.Matches(conversation))
+                {
+                    FilteredConversations.Add(conversation);
+                }
+                ConversationCountText = $"Conversations: {FilteredConversations.Count}/{Conversations.Count}";
+            });
+        }
+
+        private void OnConversationUpdated(object? sender, HttpConversation conversation)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (SelectedConversation?.Id == conversation.Id)
+                {
+                    UpdateDetailPanel();
+                }
+            });
+        }
+
+        private void UpdateDetailPanel()
+        {
+            if (SelectedConversation == null)
+            {
+                RequestHeadersText = "";
+                RequestBodyText = "";
+                ResponseHeadersText = "";
+                ResponseBodyText = "";
+                TimingText = "";
+                return;
+            }
+
+            var conv = SelectedConversation;
+
+            var reqHeaders = new StringBuilder();
+            reqHeaders.AppendLine($"{conv.Request.Method} {conv.Request.Url} {conv.Request.HttpVersion}");
+            foreach (var header in conv.Request.Headers)
+            {
+                reqHeaders.AppendLine($"{header.Key}: {header.Value}");
+            }
+            RequestHeadersText = reqHeaders.ToString();
+
+            RequestBodyText = conv.Request.Body.Length > 0
+                ? FormatBody(conv.Request.Body, conv.Request.ContentType)
+                : "(empty)";
+
+            if (conv.HasResponse)
+            {
+                var respHeaders = new StringBuilder();
+                respHeaders.AppendLine($"{conv.Response.HttpVersion} {conv.Response.StatusCode} {conv.Response.StatusDescription}");
+                foreach (var header in conv.Response.Headers)
+                {
+                    respHeaders.AppendLine($"{header.Key}: {header.Value}");
+                }
+                ResponseHeadersText = respHeaders.ToString();
+
+                ResponseBodyText = conv.Response.Body.Length > 0
+                    ? FormatBody(conv.Response.Body, conv.Response.ContentType)
+                    : "(empty)";
+            }
+            else
+            {
+                ResponseHeadersText = "(waiting for response...)";
+                ResponseBodyText = "";
+            }
+
+            var timing = new StringBuilder();
+            timing.AppendLine($"Start: {conv.StartTime:HH:mm:ss.fff}");
+            timing.AppendLine($"End: {(conv.HasResponse ? conv.EndTime.ToString("HH:mm:ss.fff") : "pending")}");
+            timing.AppendLine($"Duration: {conv.Duration.TotalMilliseconds:F1} ms");
+            timing.AppendLine($"Request Size: {conv.Request.Body.Length:N0} bytes");
+            timing.AppendLine($"Response Size: {conv.Response.Body.Length:N0} bytes");
+            timing.AppendLine($"Total Size: {conv.TotalSize:N0} bytes");
+            timing.AppendLine($"HTTPS: {(conv.IsHttps ? "Yes" : "No")}");
+            TimingText = timing.ToString();
+        }
+
+        private string FormatBody(byte[] body, string contentType)
+        {
+            if (body.Length == 0) return "(empty)";
+
+            try
+            {
+                if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase) ||
+                    contentType.Contains("xml", StringComparison.OrdinalIgnoreCase) ||
+                    contentType.Contains("text", StringComparison.OrdinalIgnoreCase) ||
+                    contentType.Contains("html", StringComparison.OrdinalIgnoreCase) ||
+                    contentType.Contains("javascript", StringComparison.OrdinalIgnoreCase) ||
+                    contentType.Contains("css", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Encoding.UTF8.GetString(body);
+                }
+
+                if (body.Length > 1024)
+                {
+                    return $"(Binary data, {body.Length:N0} bytes - use Hex viewer for details)";
+                }
+
+                return Encoding.UTF8.GetString(body);
+            }
+            catch
+            {
+                return $"(Binary data, {body.Length:N0} bytes)";
+            }
         }
     }
 }
