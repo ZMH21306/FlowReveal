@@ -23,6 +23,8 @@ namespace FlowReveal.Logging
                 Directory.CreateDirectory(_logDirectory);
             }
 
+            System.Console.OutputEncoding = System.Text.Encoding.UTF8;
+
             return new LoggerConfiguration()
                 .MinimumLevel.Debug()
                 .Enrich.WithProperty("Application", "FlowReveal")

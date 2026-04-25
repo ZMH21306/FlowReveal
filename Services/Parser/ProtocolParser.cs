@@ -1,3 +1,4 @@
+#pragma warning disable CS0067
 using System;
 using System.Collections.Generic;
 using FlowReveal.Core.Interfaces;
@@ -13,7 +14,6 @@ namespace FlowReveal.Services.Parser
         private readonly TcpReassembler _tcpReassembler;
         private readonly List<HttpConversation> _conversations = new();
         private readonly Dictionary<TcpSessionKey, PendingRequest> _pendingRequests = new();
-        private readonly object _parseLock = new();
 
         public event EventHandler<HttpConversation>? ConversationCreated;
         public event EventHandler<HttpConversation>? ConversationUpdated;
@@ -37,48 +37,28 @@ namespace FlowReveal.Services.Parser
 
         private void OnSessionDataReceived(object? sender, TcpReassemblySession session)
         {
-            lock (_parseLock)
-            {
-                TryParseHttpFromSession(session);
-            }
+            TryParseHttpFromSession(session);
         }
 
         private void OnSessionClosed(object? sender, TcpReassemblySession session)
         {
-            lock (_parseLock)
-            {
-                TryParseHttpFromSession(session);
+            TryParseHttpFromSession(session);
 
-                if (_pendingRequests.TryGetValue(session.Key, out var pending) ||
-                    _pendingRequests.TryGetValue(session.ReverseKey, out pending))
+            if (_pendingRequests.TryGetValue(session.Key, out var pending) ||
+                _pendingRequests.TryGetValue(session.ReverseKey, out pending))
+            {
+                if (pending.Conversation != null && !pending.Conversation.HasResponse)
                 {
-                    if (pending.Conversation != null && !pending.Conversation.HasResponse)
-                    {
-                        pending.Conversation.EndTime = DateTime.UtcNow;
-                        ConversationUpdated?.Invoke(this, pending.Conversation);
-                        _logger.LogDebug("HTTP conversation closed without response: {Method} {Url}",
-                            pending.Conversation.Request.Method, pending.Conversation.Request.Url);
-                    }
+                    pending.Conversation.EndTime = DateTime.UtcNow;
+                    ConversationUpdated?.Invoke(this, pending.Conversation);
+                    _logger.LogDebug("HTTP conversation closed without response: {Method} {Url}",
+                        pending.Conversation.Request.Method, pending.Conversation.Request.Url);
                 }
             }
         }
 
         private void TryParseHttpFromSession(TcpReassemblySession session)
         {
-            const int maxBufferSize = 10 * 1024 * 1024;
-
-            if (session.ClientData.Count > maxBufferSize)
-            {
-                _logger.LogWarning("Client buffer overflow for session {Key}, truncating", session.Key);
-                session.ClientData.RemoveRange(0, session.ClientData.Count - maxBufferSize);
-            }
-
-            if (session.ServerData.Count > maxBufferSize)
-            {
-                _logger.LogWarning("Server buffer overflow for session {Key}, truncating", session.Key);
-                session.ServerData.RemoveRange(0, session.ServerData.Count - maxBufferSize);
-            }
-
             var key = session.Key;
 
             while (session.ClientData.Count > 0)

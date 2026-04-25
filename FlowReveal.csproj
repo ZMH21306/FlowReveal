@@ -1,11 +1,19 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.17763</TargetFramework>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="FlowReveal.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="FlowReveal.Tests\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Models\" />

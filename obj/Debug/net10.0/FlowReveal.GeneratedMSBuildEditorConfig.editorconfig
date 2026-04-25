@@ -28,3 +28,6 @@ build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
 
 [c:/Users/21306/Desktop/FlowReveal/Views/MainWindow.axaml]
 build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
+
+[c:/Users/21306/Desktop/FlowReveal/Views/RequestEditorDialog.axaml]
+build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml

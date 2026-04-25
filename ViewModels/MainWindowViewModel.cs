@@ -2,23 +2,37 @@ using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.Xml.Linq;
 using System.Windows.Input;
 using FlowReveal.Core.Interfaces;
 using FlowReveal.Core.Models;
 using FlowReveal.Platforms.Windows.Network;
+using FlowReveal.Services.Filter;
 using Microsoft.Extensions.Logging;
 using Avalonia;
 using Avalonia.Threading;
 
 namespace FlowReveal.ViewModels
 {
+    public enum BodyDisplayMode
+    {
+        Formatted,
+        Raw,
+        Hex
+    }
+
     public partial class MainWindowViewModel : ViewModelBase
     {
         private readonly IPacketCaptureService _captureService;
         private readonly IProtocolParser _protocolParser;
         private readonly IFilterEngine _filterEngine;
+        private readonly SearchEngine _searchEngine;
         private readonly NetworkAdapterManager _adapterManager;
         private readonly ILogger<MainWindowViewModel> _logger;
+        private readonly System.Threading.Timer _memoryTimer;
+        private readonly System.Threading.Timer _cleanupTimer;
+        private const int MaxConversations = 10000;
 
         public ObservableCollection<HttpConversation> Conversations { get; } = new();
         public ObservableCollection<HttpConversation> FilteredConversations { get; } = new();
@@ -65,6 +79,27 @@ namespace FlowReveal.ViewModels
             set => SetProperty(ref _filterText, value);
         }
 
+        private string _searchText = "";
+        public string SearchText
+        {
+            get => _searchText;
+            set => SetProperty(ref _searchText, value);
+        }
+
+        private bool _isSearchActive;
+        public bool IsSearchActive
+        {
+            get => _isSearchActive;
+            set => SetProperty(ref _isSearchActive, value);
+        }
+
+        private string _searchResultCountText = "";
+        public string SearchResultCountText
+        {
+            get => _searchResultCountText;
+            set => SetProperty(ref _searchResultCountText, value);
+        }
+
         private HttpConversation? _selectedConversation;
         public HttpConversation? SelectedConversation
         {
@@ -83,6 +118,40 @@ namespace FlowReveal.ViewModels
         {
             get => _selectedDetailTab;
             set => SetProperty(ref _selectedDetailTab, value);
+        }
+
+        private int _selectedBodyDisplayMode = (int)BodyDisplayMode.Formatted;
+        public int SelectedBodyDisplayMode
+        {
+            get => _selectedBodyDisplayMode;
+            set
+            {
+                if (SetProperty(ref _selectedBodyDisplayMode, value))
+                {
+                    OnPropertyChanged(nameof(IsFormattedMode));
+                    OnPropertyChanged(nameof(IsRawMode));
+                    OnPropertyChanged(nameof(IsHexMode));
+                    UpdateDetailPanel();
+                }
+            }
+        }
+
+        public bool IsFormattedMode
+        {
+            get => SelectedBodyDisplayMode == (int)BodyDisplayMode.Formatted;
+            set { if (value) SelectedBodyDisplayMode = (int)BodyDisplayMode.Formatted; }
+        }
+
+        public bool IsRawMode
+        {
+            get => SelectedBodyDisplayMode == (int)BodyDisplayMode.Raw;
+            set { if (value) SelectedBodyDisplayMode = (int)BodyDisplayMode.Raw; }
+        }
+
+        public bool IsHexMode
+        {
+            get => SelectedBodyDisplayMode == (int)BodyDisplayMode.Hex;
+            set { if (value) SelectedBodyDisplayMode = (int)BodyDisplayMode.Hex; }
         }
 
         private string _requestHeadersText = "";
@@ -125,17 +194,21 @@ namespace FlowReveal.ViewModels
         public ICommand ClearCommand { get; }
         public ICommand ApplyFilterCommand { get; }
         public ICommand ClearFilterCommand { get; }
+        public ICommand SearchCommand { get; }
+        public ICommand ClearSearchCommand { get; }
 
         public MainWindowViewModel(
             IPacketCaptureService captureService,
             IProtocolParser protocolParser,
             IFilterEngine filterEngine,
+            SearchEngine searchEngine,
             NetworkAdapterManager adapterManager,
             ILogger<MainWindowViewModel> logger)
         {
             _captureService = captureService;
             _protocolParser = protocolParser;
             _filterEngine = filterEngine;
+            _searchEngine = searchEngine;
             _adapterManager = adapterManager;
             _logger = logger;
 
@@ -144,12 +217,17 @@ namespace FlowReveal.ViewModels
             ClearCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteClear);
             ApplyFilterCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteApplyFilter);
             ClearFilterCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteClearFilter);
+            SearchCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteSearch);
+            ClearSearchCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(ExecuteClearSearch);
 
             _captureService.StatusChanged += OnCaptureStatusChanged;
             _captureService.StatisticsUpdated += OnStatisticsUpdated;
             _captureService.PacketCaptured += OnPacketCaptured;
             _protocolParser.ConversationCreated += OnConversationCreated;
             _protocolParser.ConversationUpdated += OnConversationUpdated;
+
+            _memoryTimer = new System.Threading.Timer(_ => UpdateMemoryUsage(), null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
+            _cleanupTimer = new System.Threading.Timer(_ => CleanupOldConversations(), null, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2));
 
             _logger.LogInformation("MainWindowViewModel initialized");
         }
@@ -222,6 +300,50 @@ namespace FlowReveal.ViewModels
             _filterEngine.ClearFilter();
             FilterText = "";
             ApplyCurrentFilter();
+        }
+
+        private void ExecuteSearch()
+        {
+            if (string.IsNullOrWhiteSpace(SearchText))
+            {
+                ExecuteClearSearch();
+                return;
+            }
+
+            foreach (var conv in Conversations)
+            {
+                conv.IsSearchMatch = false;
+            }
+
+            var results = _searchEngine.Search(Conversations, SearchText);
+
+            foreach (var result in results)
+            {
+                result.Conversation.IsSearchMatch = true;
+            }
+
+            IsSearchActive = true;
+            SearchResultCountText = $"{results.Count} match(es)";
+
+            ApplyCurrentFilter();
+
+            _logger.LogInformation("Search executed: {Query}, {Count} matches", SearchText, results.Count);
+        }
+
+        private void ExecuteClearSearch()
+        {
+            foreach (var conv in Conversations)
+            {
+                conv.IsSearchMatch = false;
+            }
+
+            SearchText = "";
+            IsSearchActive = false;
+            SearchResultCountText = "";
+
+            ApplyCurrentFilter();
+
+            _logger.LogInformation("Search cleared");
         }
 
         private FilterGroup ParseFilterText(string text)
@@ -373,33 +495,154 @@ namespace FlowReveal.ViewModels
             TimingText = timing.ToString();
         }
 
+        private void UpdateMemoryUsage()
+        {
+            var process = System.Diagnostics.Process.GetCurrentProcess();
+            var memoryMB = process.WorkingSet64 / (1024.0 * 1024.0);
+            Dispatcher.UIThread.Post(() =>
+            {
+                MemoryUsageText = $"Memory: {memoryMB:F1} MB";
+            });
+        }
+
+        private void CleanupOldConversations()
+        {
+            if (Conversations.Count <= MaxConversations) return;
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                var removeCount = Conversations.Count - MaxConversations;
+                for (int i = 0; i < removeCount; i++)
+                {
+                    if (Conversations.Count > 0)
+                    {
+                        var conv = Conversations[0];
+                        Conversations.RemoveAt(0);
+                        FilteredConversations.Remove(conv);
+                    }
+                }
+                ConversationCountText = $"Conversations: {FilteredConversations.Count}/{Conversations.Count}";
+                _logger.LogInformation("Cleaned up {Count} old conversations, remaining: {Total}", removeCount, Conversations.Count);
+            });
+        }
+
         private string FormatBody(byte[] body, string contentType)
         {
             if (body.Length == 0) return "(empty)";
 
+            var mode = (BodyDisplayMode)SelectedBodyDisplayMode;
+
+            if (mode == BodyDisplayMode.Hex)
+            {
+                return FormatHexBody(body);
+            }
+
             try
             {
-                if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase) ||
-                    contentType.Contains("xml", StringComparison.OrdinalIgnoreCase) ||
-                    contentType.Contains("text", StringComparison.OrdinalIgnoreCase) ||
+                var text = Encoding.UTF8.GetString(body);
+
+                if (mode == BodyDisplayMode.Raw)
+                {
+                    return text;
+                }
+
+                if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+                {
+                    return FormatJsonBody(text);
+                }
+
+                if (contentType.Contains("xml", StringComparison.OrdinalIgnoreCase))
+                {
+                    return FormatXmlBody(text);
+                }
+
+                if (contentType.Contains("text", StringComparison.OrdinalIgnoreCase) ||
                     contentType.Contains("html", StringComparison.OrdinalIgnoreCase) ||
                     contentType.Contains("javascript", StringComparison.OrdinalIgnoreCase) ||
                     contentType.Contains("css", StringComparison.OrdinalIgnoreCase))
                 {
-                    return Encoding.UTF8.GetString(body);
+                    return text;
                 }
 
-                if (body.Length > 1024)
-                {
-                    return $"(Binary data, {body.Length:N0} bytes - use Hex viewer for details)";
-                }
-
-                return Encoding.UTF8.GetString(body);
+                return text;
             }
             catch
             {
-                return $"(Binary data, {body.Length:N0} bytes)";
+                return FormatHexBody(body);
             }
+        }
+
+        private static string FormatJsonBody(string json)
+        {
+            try
+            {
+                var doc = JsonDocument.Parse(json);
+                var options = new JsonWriterOptions { Indented = true };
+                using var stream = new System.IO.MemoryStream();
+                using var writer = new Utf8JsonWriter(stream, options);
+                doc.WriteTo(writer);
+                writer.Flush();
+                return Encoding.UTF8.GetString(stream.ToArray());
+            }
+            catch
+            {
+                return json;
+            }
+        }
+
+        private static string FormatXmlBody(string xml)
+        {
+            try
+            {
+                var doc = XDocument.Parse(xml);
+                return doc.ToString();
+            }
+            catch
+            {
+                return xml;
+            }
+        }
+
+        private static string FormatHexBody(byte[] data)
+        {
+            if (data.Length == 0) return "(empty)";
+
+            var sb = new StringBuilder();
+            var lines = (data.Length + 15) / 16;
+
+            for (int i = 0; i < lines; i++)
+            {
+                var offset = i * 16;
+                sb.Append($"{offset:X8}  ");
+
+                for (int j = 0; j < 16; j++)
+                {
+                    if (j == 8) sb.Append(' ');
+                    if (offset + j < data.Length)
+                    {
+                        sb.Append($"{data[offset + j]:X2} ");
+                    }
+                    else
+                    {
+                        sb.Append("   ");
+                    }
+                }
+
+                sb.Append(' ');
+
+                for (int j = 0; j < 16; j++)
+                {
+                    if (offset + j < data.Length)
+                    {
+                        var b = data[offset + j];
+                        sb.Append(b >= 0x20 && b <= 0x7E ? (char)b : '.');
+                    }
+                }
+
+                if (i < lines - 1) sb.AppendLine();
+            }
+
+            return sb.ToString();
         }
     }
 }

@@ -1,7 +1,7 @@
 {
   "version": 3,
   "targets": {
-    "net10.0": {
+    "net10.0-windows10.0.17763": {
       "Avalonia/11.3.12": {
         "type": "package",
         "dependencies": {
@@ -1984,7 +1984,7 @@
     }
   },
   "projectFileDependencyGroups": {
-    "net10.0": [
+    "net10.0-windows10.0.17763": [
       "Avalonia >= 11.3.12",
       "Avalonia.Controls.DataGrid >= 11.3.12",
       "Avalonia.Desktop >= 11.3.12",
@@ -2009,11 +2009,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "c:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+      "projectUniqueName": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
       "projectName": "FlowReveal",
-      "projectPath": "c:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+      "projectPath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
       "packagesPath": "C:\\Users\\21306\\.nuget\\packages\\",
-      "outputPath": "c:\\Users\\21306\\Desktop\\FlowReveal\\obj\\",
+      "outputPath": "C:\\Users\\21306\\Desktop\\FlowReveal\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -2024,7 +2024,7 @@
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
       "originalTargetFrameworks": [
-        "net10.0"
+        "net10.0-windows10.0.17763"
       ],
       "sources": {
         "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
@@ -2032,8 +2032,8 @@
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
-        "net10.0": {
-          "targetAlias": "net10.0",
+        "net10.0-windows10.0.17763": {
+          "targetAlias": "net10.0-windows10.0.17763",
           "projectReferences": {}
         }
       },
@@ -2050,8 +2050,8 @@
       "SdkAnalysisLevel": "10.0.200"
     },
     "frameworks": {
-      "net10.0": {
-        "targetAlias": "net10.0",
+      "net10.0-windows10.0.17763": {
+        "targetAlias": "net10.0-windows10.0.17763",
         "dependencies": {
           "Avalonia": {
             "target": "Package",
@@ -2125,8 +2125,17 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.Windows.SDK.NET.Ref",
+            "version": "[10.0.17763.57, 10.0.17763.57]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          },
+          "Microsoft.Windows.SDK.NET.Ref.Windows": {
             "privateAssets": "all"
           }
         },
@@ -2416,7 +2425,7 @@
       "message": "包 \"Tmds.DBus.Protocol\" 0.21.2 具有已知的 高 严重性漏洞，https://github.com/advisories/GHSA-xrw6-gwf8-vvr9",
       "libraryId": "Tmds.DBus.Protocol",
       "targetGraphs": [
-        "net10.0"
+        "net10.0-windows10.0.17763"
       ]
     }
   ]

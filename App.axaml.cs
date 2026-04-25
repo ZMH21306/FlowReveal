@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Data.Core;
@@ -7,7 +9,6 @@ using FlowReveal.Core.Interfaces;
 using FlowReveal.Platforms.Windows.Capture;
 using FlowReveal.Platforms.Windows.Network;
 using FlowReveal.Platforms.Windows.Security;
-using FlowReveal.Services;
 using FlowReveal.Services.Analysis;
 using FlowReveal.Services.Filter;
 using FlowReveal.Services.Parser;
@@ -17,7 +18,6 @@ using FlowReveal.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
-using System.Linq;
 
 namespace FlowReveal
 {
@@ -40,12 +40,11 @@ namespace FlowReveal
                 ConfigureServices(services);
                 _serviceProvider = services.BuildServiceProvider();
 
-                var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
-
                 var mainViewModel = new MainWindowViewModel(
                     _serviceProvider.GetRequiredService<IPacketCaptureService>(),
                     _serviceProvider.GetRequiredService<IProtocolParser>(),
                     _serviceProvider.GetRequiredService<IFilterEngine>(),
+                    _serviceProvider.GetRequiredService<SearchEngine>(),
                     _serviceProvider.GetRequiredService<NetworkAdapterManager>(),
                     _serviceProvider.GetRequiredService<ILogger<MainWindowViewModel>>()
                 );
@@ -83,6 +82,19 @@ namespace FlowReveal
 
         private void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
         {
+            try
+            {
+                var proxyServer = _serviceProvider?.GetService(typeof(HttpsProxyServer)) as HttpsProxyServer;
+                if (proxyServer != null && proxyServer.IsRunning)
+                {
+                    proxyServer.SetSystemProxy(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Failed to restore system proxy on exit");
+            }
+
             Log.Information("Application exiting, disposing services");
             _serviceProvider?.Dispose();
         }

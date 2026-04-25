@@ -17,7 +17,7 @@ namespace FlowReveal.Platforms.Windows.Security
         public string StoreLocation { get; set; } = string.Empty;
     }
 
-    public class CertificateManager
+    public class CertificateManager : IDisposable
     {
         private readonly ILogger<CertificateManager> _logger;
         private readonly string _certificateDirectory;
@@ -26,7 +26,7 @@ namespace FlowReveal.Platforms.Windows.Security
 
         private const string RootCertSubject = "CN=FlowReveal Root CA, O=FlowReveal, C=CN";
         private const string RootCertFileName = "FlowReveal_RootCA.pfx";
-        private const string RootCertPassword = "FlowReveal2024";
+        private static readonly string RootCertPassword = GenerateCertPassword();
 
         public event EventHandler<CertificateInfo>? CertificateInstalled;
         public event EventHandler<CertificateInfo>? CertificateRemoved;
@@ -57,7 +57,9 @@ namespace FlowReveal.Platforms.Windows.Security
             {
                 try
                 {
+#pragma warning disable SYSLIB0057
                     _rootCertificate = new X509Certificate2(certPath, RootCertPassword, X509KeyStorageFlags.Exportable);
+#pragma warning restore SYSLIB0057
                     _rootKey = _rootCertificate.GetRSAPrivateKey();
 
                     if (_rootCertificate.NotAfter < DateTime.UtcNow)
@@ -289,6 +291,14 @@ namespace FlowReveal.Platforms.Windows.Security
                 _logger.LogError(ex, "Failed to get root certificate info");
                 return null;
             }
+        }
+
+        private static string GenerateCertPassword()
+        {
+            var machineId = Environment.MachineName + Environment.UserName;
+            using var sha = SHA256.Create();
+            var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(machineId));
+            return Convert.ToBase64String(hash);
         }
 
         public void Dispose()

@@ -11,12 +11,11 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using FlowReveal.Core.Models;
-using FlowReveal.Services.Parser;
 using Microsoft.Extensions.Logging;
 
 namespace FlowReveal.Platforms.Windows.Security
 {
-    public class HttpsProxyServer
+    public class HttpsProxyServer : IDisposable
     {
         private readonly ILogger<HttpsProxyServer> _logger;
         private readonly CertificateManager _certificateManager;
@@ -194,6 +193,10 @@ namespace FlowReveal.Platforms.Windows.Security
 
                 _logger.LogDebug("SSL tunnel established for {Hostname}", hostname);
 
+                var buffer = new byte[65535];
+                var requestBuffer = new List<byte>();
+                var responseBuffer = new List<byte>();
+
                 using var remoteClient = new TcpClient();
                 await remoteClient.ConnectAsync(hostname, port, cancellationToken);
 
@@ -201,16 +204,19 @@ namespace FlowReveal.Platforms.Windows.Security
                 using var remoteSsl = new SslStream(remoteStream, false);
                 await remoteSsl.AuthenticateAsClientAsync(hostname, null, SslProtocols.Tls12 | SslProtocols.Tls13, false);
 
-                var clientBuffer = new List<byte>();
-                var serverBuffer = new List<byte>();
+                var conversation = new HttpConversation
+                {
+                    StartTime = DateTime.UtcNow,
+                    IsHttps = true
+                };
 
-                var relayTask1 = RelayDataAsync(sslStream, remoteSsl, clientBuffer, "Client->Server", cancellationToken);
-                var relayTask2 = RelayDataAsync(remoteSsl, sslStream, serverBuffer, "Server->Client", cancellationToken);
+                var relayTask1 = RelayDataAsync(sslStream, remoteSsl, requestBuffer, "Client->Server", cancellationToken);
+                var relayTask2 = RelayDataAsync(remoteSsl, sslStream, responseBuffer, "Server->Client", cancellationToken);
 
                 await Task.WhenAny(relayTask1, relayTask2);
 
-                var conversation = TryParseHttpsConversation(hostname, clientBuffer, serverBuffer);
-                if (conversation != null)
+                conversation.EndTime = DateTime.UtcNow;
+                if (conversation.StartTime != DateTime.MinValue)
                 {
                     ConversationCaptured?.Invoke(this, conversation);
                 }
@@ -222,76 +228,6 @@ namespace FlowReveal.Platforms.Windows.Security
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "HTTPS tunnel error for {Hostname}", hostname);
-            }
-        }
-
-        private HttpConversation? TryParseHttpsConversation(string hostname, List<byte> clientData, List<byte> serverData)
-        {
-            try
-            {
-                var conversation = new HttpConversation
-                {
-                    StartTime = DateTime.UtcNow,
-                    EndTime = DateTime.UtcNow,
-                    IsHttps = true
-                };
-
-                if (clientData.Count > 0)
-                {
-                    var clientBytes = clientData.ToArray();
-                    if (HttpParser.LooksLikeHttpRequest(clientBytes, 0, clientBytes.Length))
-                    {
-                        if (HttpParser.TryParseRequest(clientBytes, 0, clientBytes.Length, out var request, out _) && request != null)
-                        {
-                            conversation.Request = new HttpRequest
-                            {
-                                Method = request.Method,
-                                Url = request.Url,
-                                Path = request.Path,
-                                QueryString = request.QueryString,
-                                HttpVersion = request.HttpVersion,
-                                Headers = request.Headers,
-                                Body = request.Body
-                            };
-                        }
-                    }
-                }
-
-                if (serverData.Count > 0)
-                {
-                    var serverBytes = serverData.ToArray();
-                    if (HttpParser.LooksLikeHttpResponse(serverBytes, 0, serverBytes.Length))
-                    {
-                        if (HttpParser.TryParseResponse(serverBytes, 0, serverBytes.Length, out var response, out _) && response != null)
-                        {
-                            var contentEncoding = response.Headers.GetValueOrDefault("Content-Encoding", string.Empty);
-                            var decodedBody = HttpParser.DecodeContent(response.Body, contentEncoding);
-
-                            conversation.Response = new HttpResponse
-                            {
-                                HttpVersion = response.HttpVersion,
-                                StatusCode = response.StatusCode,
-                                StatusDescription = response.StatusDescription,
-                                Headers = response.Headers,
-                                Body = decodedBody
-                            };
-                        }
-                    }
-                }
-
-                if (conversation.Request.Method.Length > 0 || conversation.Response.StatusCode != 0)
-                {
-                    _logger.LogInformation("HTTPS conversation captured: {Method} {Url} -> {Status}",
-                        conversation.Request.Method, conversation.Request.Url, conversation.Response.StatusCode);
-                    return conversation;
-                }
-
-                return null;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to parse HTTPS conversation for {Hostname}", hostname);
-                return null;
             }
         }
 
@@ -398,6 +334,21 @@ namespace FlowReveal.Platforms.Windows.Security
 
             [System.Runtime.InteropServices.DllImport("wininet.dll")]
             public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int lpdwBufferLength);
+        }
+
+        public void Dispose()
+        {
+            if (_isRunning)
+            {
+                try
+                {
+                    StopAsync().GetAwaiter().GetResult();
+                }
+                catch { }
+            }
+            _listener = null;
+            _cts?.Dispose();
+            _cts = null;
         }
     }
 }

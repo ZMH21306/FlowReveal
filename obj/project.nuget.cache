@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "dy3fETDceok=",
+  "dgSpecHash": "kJ8zkqIUjnA=",
   "success": true,
-  "projectFilePath": "c:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+  "projectFilePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\21306\\.nuget\\packages\\avalonia\\11.3.12\\avalonia.11.3.12.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.angle.windows.natives\\2.1.25547.20250602\\avalonia.angle.windows.natives.2.1.25547.20250602.nupkg.sha512",
@@ -43,19 +43,20 @@
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.macos\\2.88.9\\skiasharp.nativeassets.macos.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.webassembly\\2.88.9\\skiasharp.nativeassets.webassembly.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.win32\\2.88.9\\skiasharp.nativeassets.win32.2.88.9.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\tmds.dbus.protocol\\0.21.2\\tmds.dbus.protocol.0.21.2.nupkg.sha512"
+    "C:\\Users\\21306\\.nuget\\packages\\tmds.dbus.protocol\\0.21.2\\tmds.dbus.protocol.0.21.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.17763.57\\microsoft.windows.sdk.net.ref.10.0.17763.57.nupkg.sha512"
   ],
   "logs": [
     {
       "code": "NU1903",
       "level": "Warning",
       "message": "包 \"Tmds.DBus.Protocol\" 0.21.2 具有已知的 高 严重性漏洞，https://github.com/advisories/GHSA-xrw6-gwf8-vvr9",
-      "projectPath": "c:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+      "projectPath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
       "warningLevel": 1,
-      "filePath": "c:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
+      "filePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
       "libraryId": "Tmds.DBus.Protocol",
       "targetGraphs": [
-        "net10.0"
+        "net10.0-windows10.0.17763"
       ]
     }
   ]

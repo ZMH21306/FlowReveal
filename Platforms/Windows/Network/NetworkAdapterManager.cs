@@ -86,7 +86,7 @@ namespace FlowReveal.Platforms.Windows.Network
                     {
                         Index = GetInterfaceIndex(ni),
                         Name = ni.Name,
-                        Description = ni.Description,
+                        Description = ni.Description ?? string.Empty,
                         FriendlyName = ni.Name,
                         IsUp = ni.OperationalStatus == OperationalStatus.Up,
                         IsLoopback = ni.NetworkInterfaceType == NetworkInterfaceType.Loopback,
