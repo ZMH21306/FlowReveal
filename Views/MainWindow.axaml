@@ -1,13 +1,14 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:FlowReveal.ViewModels"
+        xmlns:models="using:FlowReveal.Core.Models"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
         x:Class="FlowReveal.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Icon="/Assets/avalonia-logo.ico"
-        Title="FlowReveal - Network Packet Analyzer"
+        Title="FlowReveal - 网络数据包分析器"
         Width="1200" Height="800"
         MinWidth="800" MinHeight="600">
 
@@ -15,107 +16,108 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <DockPanel>
-        <!-- Toolbar -->
-        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource SystemControlForegroundChromeMediumBrush}" BorderThickness="0,0,0,1" Padding="8,8">
-            <StackPanel Orientation="Horizontal" Spacing="8" Wrap="Wrap">
-                <Button Content="▶ Start" Command="{Binding StartCaptureCommand}" IsEnabled="{Binding !IsCapturing}"/>
-                <Button Content="⏹ Stop" Command="{Binding StopCaptureCommand}" IsEnabled="{Binding IsCapturing}"/>
-                <Button Content="🗑 Clear" Command="{Binding ClearCommand}"/>
-                
-                <Separator Width="1" Margin="4,0"/>
-                
-                <TextBlock Text="Filter:" VerticalAlignment="Center" Margin="4,0,4,0" FontWeight="Medium"/>
-                <TextBox Text="{Binding FilterText}" Watermark="e.g. host:example.com" MinWidth="250" MaxWidth="400"/>
-                <Button Content="Apply" Command="{Binding ApplyFilterCommand}"/>
-                <Button Content="Clear" Command="{Binding ClearFilterCommand}"/>
-                
-                <Separator Width="1" Margin="4,0"/>
-                
-                <TextBlock Text="Search:" VerticalAlignment="Center" Margin="4,0,4,0" FontWeight="Medium"/>
-                <TextBox Text="{Binding SearchText}" Watermark="Search in packets..." MinWidth="200" MaxWidth="300"/>
-                <Button Content="Search" Command="{Binding SearchCommand}"/>
-                <Button Content="Clear" Command="{Binding ClearSearchCommand}"/>
-                <TextBlock Text="{Binding SearchResultCountText}" VerticalAlignment="Center" Foreground="{DynamicResource SystemAccentColor}" FontWeight="Medium"/>
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
+        <!-- 工具栏 -->
+        <Border Grid.Row="0" Background="#F5F5F5" BorderBrush="#CCCCCC" BorderThickness="0,0,0,1" Padding="8,8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="▶ 开始捕获" Command="{Binding StartCaptureCommand}" IsEnabled="{Binding !IsCapturing}"/>
+                <Button Content="⏹ 停止捕获" Command="{Binding StopCaptureCommand}" IsEnabled="{Binding IsCapturing}"/>
+                <Button Content="🗑 清空" Command="{Binding ClearCommand}"/>
+                <Border Width="1" Background="#CCCCCC" Margin="4,0"/>
+                <TextBlock Text="过滤:" VerticalAlignment="Center" Margin="4,0,4,0" FontWeight="Medium" Foreground="#333333"/>
+                <TextBox Text="{Binding FilterText}" Watermark="例如: host:example.com" MinWidth="250" MaxWidth="400"/>
+                <Button Content="应用" Command="{Binding ApplyFilterCommand}"/>
+                <Button Content="清除" Command="{Binding ClearFilterCommand}"/>
+                <Border Width="1" Background="#CCCCCC" Margin="4,0"/>
+                <TextBlock Text="搜索:" VerticalAlignment="Center" Margin="4,0,4,0" FontWeight="Medium" Foreground="#333333"/>
+                <TextBox Text="{Binding SearchText}" Watermark="搜索数据包内容..." MinWidth="200" MaxWidth="300"/>
+                <Button Content="搜索" Command="{Binding SearchCommand}"/>
+                <Button Content="清除" Command="{Binding ClearSearchCommand}"/>
+                <TextBlock Text="{Binding SearchResultCountText}" VerticalAlignment="Center" Foreground="#0066CC" FontWeight="Medium"/>
             </StackPanel>
         </Border>
 
-        <!-- Status Bar -->
-        <Border DockPanel.Dock="Bottom" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}" BorderBrush="{DynamicResource SystemControlForegroundChromeMediumBrush}" BorderThickness="0,1,0,0" Padding="12,6">
-            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
-                <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontWeight="Medium" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                <TextBlock Grid.Column="1" Text="{Binding StatisticsText}" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                <TextBlock Grid.Column="3" Text="{Binding ConversationCountText}" VerticalAlignment="Center" Margin="0,0,16,0" HorizontalAlignment="Right"/>
-                <TextBlock Grid.Column="4" Text="{Binding MemoryUsageText}" VerticalAlignment="Center"/>
+        <!-- 表头 -->
+        <Border Grid.Row="1" Background="#E8E8E8" BorderBrush="#CCCCCC" BorderThickness="0,0,0,1" Padding="8,4">
+            <Grid ColumnDefinitions="70,80,200,*,90,90,60">
+                <TextBlock Grid.Column="0" Text="状态码" FontWeight="SemiBold" Foreground="#333333"/>
+                <TextBlock Grid.Column="1" Text="方法" FontWeight="SemiBold" Foreground="#333333"/>
+                <TextBlock Grid.Column="2" Text="主机" FontWeight="SemiBold" Foreground="#333333"/>
+                <TextBlock Grid.Column="3" Text="URL" FontWeight="SemiBold" Foreground="#333333"/>
+                <TextBlock Grid.Column="4" Text="大小" FontWeight="SemiBold" Foreground="#333333"/>
+                <TextBlock Grid.Column="5" Text="耗时" FontWeight="SemiBold" Foreground="#333333"/>
+                <TextBlock Grid.Column="6" Text="HTTPS" FontWeight="SemiBold" Foreground="#333333"/>
             </Grid>
         </Border>
 
-        <!-- Main Content -->
-        <Grid RowDefinitions="*,2,250">
-            <!-- Traffic List -->
-            <DataGrid x:Name="TrafficDataGrid"
-                      Grid.Row="0"
-                      ItemsSource="{Binding FilteredConversations}"
-                      SelectedItem="{Binding SelectedConversation}"
-                      IsReadOnly="True"
-                      AutoGenerateColumns="False"
-                      CanUserSortColumns="True"
-                      GridLinesVisibility="Horizontal"
-                      SelectionMode="Single"
-                      AlternatingRowBackground="{DynamicResource SystemControlBackgroundListLowBrush}"
-                      HeadersVisibility="Column"
-                      BorderThickness="0,0,0,1"
-                      BorderBrush="{DynamicResource SystemControlForegroundChromeMediumBrush}">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Status" Binding="{Binding Response.StatusCode}" Width="60"/>
-                    <DataGridTextColumn Header="Method" Binding="{Binding Request.Method}" Width="80"/>
-                    <DataGridTextColumn Header="Host" Binding="{Binding Host}" Width="180"/>
-                    <DataGridTextColumn Header="URL" Binding="{Binding Request.Path}" Width="*"/>
-                    <DataGridTextColumn Header="Size" Binding="{Binding TotalSize}" Width="90"/>
-                    <DataGridTextColumn Header="Duration" Binding="{Binding Duration.TotalMilliseconds, StringFormat={}{0:F0} ms}" Width="90"/>
-                    <DataGridCheckBoxColumn Header="HTTPS" Binding="{Binding IsHttps}" Width="60"/>
-                </DataGrid.Columns>
-            </DataGrid>
+        <!-- 数据包列表 -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding FilteredConversations}" x:DataType="vm:MainWindowViewModel">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:HttpConversation">
+                        <Border BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="8,4">
+                            <Grid ColumnDefinitions="70,80,200,*,90,90,60">
+                                <TextBlock Grid.Column="0" Text="{Binding Response.StatusCode}" Foreground="#333333" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Request.Method}" Foreground="#333333" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="2" Text="{Binding Host}" Foreground="#333333" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Grid.Column="3" Text="{Binding Request.Path}" Foreground="#333333" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Grid.Column="4" Text="{Binding TotalSize}" Foreground="#333333" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="5" Text="{Binding Duration.TotalMilliseconds, StringFormat={}{0:F0} ms}" Foreground="#333333" VerticalAlignment="Center"/>
+                                <CheckBox Grid.Column="6" IsChecked="{Binding IsHttps}" IsEnabled="False" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
 
-            <!-- Splitter -->
-            <GridSplitter Grid.Row="1" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Height="4"/>
-
-            <!-- Detail Panel -->
-            <TabControl Grid.Row="2" SelectedIndex="{Binding SelectedDetailTab}" TabStripPlacement="Left">
-                <TabItem Header="Request">
+        <!-- 详情面板 -->
+        <Border Grid.Row="3" Height="250" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0">
+            <TabControl SelectedIndex="{Binding SelectedDetailTab}" TabStripPlacement="Left">
+                <TabItem Header="请求">
                     <ScrollViewer>
                         <StackPanel Margin="8">
-                            <TextBlock Text="Request Headers" FontWeight="Bold" Margin="0,0,0,4"/>
-                            <TextBox Text="{Binding RequestHeadersText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="60" BorderThickness="1"/>
-                            <TextBlock Text="Request Body" FontWeight="Bold" Margin="0,8,0,4"/>
-                            <TextBox Text="{Binding RequestBodyText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="80" BorderThickness="1"/>
+                            <TextBlock Text="请求头" FontWeight="Bold" Margin="0,0,0,4" Foreground="#333333"/>
+                            <TextBox Text="{Binding RequestHeadersText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="60" Foreground="#333333"/>
+                            <TextBlock Text="请求体" FontWeight="Bold" Margin="0,8,0,4" Foreground="#333333"/>
+                            <TextBox Text="{Binding RequestBodyText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="80" Foreground="#333333"/>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
-                <TabItem Header="Response">
+                <TabItem Header="响应">
                     <ScrollViewer>
                         <StackPanel Margin="8">
-                            <TextBlock Text="Response Headers" FontWeight="Bold" Margin="0,0,0,4"/>
-                            <TextBox Text="{Binding ResponseHeadersText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="60" BorderThickness="1"/>
+                            <TextBlock Text="响应头" FontWeight="Bold" Margin="0,0,0,4" Foreground="#333333"/>
+                            <TextBox Text="{Binding ResponseHeadersText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="60" Foreground="#333333"/>
                             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,4">
-                                <TextBlock Text="Body Mode:" VerticalAlignment="Center" FontWeight="Medium"/>
-                                <RadioButton Content="Formatted" GroupName="BodyMode" IsChecked="{Binding IsFormattedMode, Mode=TwoWay}"/>
-                                <RadioButton Content="Raw" GroupName="BodyMode" IsChecked="{Binding IsRawMode, Mode=TwoWay}"/>
-                                <RadioButton Content="Hex" GroupName="BodyMode" IsChecked="{Binding IsHexMode, Mode=TwoWay}"/>
+                                <TextBlock Text="显示模式:" VerticalAlignment="Center" FontWeight="Medium" Foreground="#333333"/>
+                                <RadioButton Content="格式化" GroupName="BodyMode" IsChecked="{Binding IsFormattedMode, Mode=TwoWay}"/>
+                                <RadioButton Content="原始" GroupName="BodyMode" IsChecked="{Binding IsRawMode, Mode=TwoWay}"/>
+                                <RadioButton Content="十六进制" GroupName="BodyMode" IsChecked="{Binding IsHexMode, Mode=TwoWay}"/>
                             </StackPanel>
-                            <TextBox Text="{Binding ResponseBodyText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="120" BorderThickness="1"/>
+                            <TextBox Text="{Binding ResponseBodyText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="80" Foreground="#333333"/>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
-                <TabItem Header="Timeline">
+                <TabItem Header="时间线">
                     <ScrollViewer>
                         <StackPanel Margin="8">
-                            <TextBlock Text="Timing Information" FontWeight="Bold" Margin="0,0,0,4"/>
-                            <TextBox Text="{Binding TimingText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="100" BorderThickness="1"/>
+                            <TextBlock Text="时间信息" FontWeight="Bold" Margin="0,0,0,4" Foreground="#333333"/>
+                            <TextBox Text="{Binding TimingText}" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" MinHeight="100" Foreground="#333333"/>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
             </TabControl>
-        </Grid>
-    </DockPanel>
+        </Border>
+
+        <!-- 状态栏 -->
+        <Border Grid.Row="4" Background="#F0F0F0" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0" Padding="12,6">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontWeight="Medium" VerticalAlignment="Center" Margin="0,0,16,0" Foreground="#333333"/>
+                <TextBlock Grid.Column="1" Text="{Binding StatisticsText}" VerticalAlignment="Center" Margin="0,0,16,0" Foreground="#333333"/>
+                <TextBlock Grid.Column="3" Text="{Binding ConversationCountText}" VerticalAlignment="Center" Margin="0,0,16,0" HorizontalAlignment="Right" Foreground="#333333"/>
+                <TextBlock Grid.Column="4" Text="{Binding MemoryUsageText}" VerticalAlignment="Center" Foreground="#333333"/>
+            </Grid>
+        </Border>
+    </Grid>
 </Window>

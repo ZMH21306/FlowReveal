@@ -44,21 +44,21 @@ namespace FlowReveal.ViewModels
             set => SetProperty(ref _isCapturing, value);
         }
 
-        private string _statusText = "Ready";
+        private string _statusText = "就绪";
         public string StatusText
         {
             get => _statusText;
             set => SetProperty(ref _statusText, value);
         }
 
-        private string _statisticsText = "Packets: 0 | Bytes: 0";
+        private string _statisticsText = "数据包: 0 | 字节: 0";
         public string StatisticsText
         {
             get => _statisticsText;
             set => SetProperty(ref _statisticsText, value);
         }
 
-        private string _conversationCountText = "Conversations: 0";
+        private string _conversationCountText = "会话: 0";
         public string ConversationCountText
         {
             get => _conversationCountText;
@@ -241,13 +241,15 @@ namespace FlowReveal.ViewModels
 
                 if (adapter == null)
                 {
-                    StatusText = "No network adapter available";
+                    StatusText = "没有可用的网络适配器";
                     _logger.LogWarning("No network adapter available for capture");
                     return;
                 }
 
                 _logger.LogInformation("Starting capture on adapter: {AdapterName}", adapter.FriendlyName);
                 await _captureService.StartCaptureAsync(adapter);
+                IsCapturing = true;
+                StatusText = "正在捕获...";
             }
             catch (Exception ex)
             {
@@ -261,11 +263,14 @@ namespace FlowReveal.ViewModels
             try
             {
                 await _captureService.StopCaptureAsync();
+                IsCapturing = false;
+                StatusText = "已停止";
                 _logger.LogInformation("Capture stopped by user");
             }
             catch (Exception ex)
             {
-                StatusText = $"Error: {ex.Message}";
+                IsCapturing = false;
+                StatusText = $"错误: {ex.Message}";
                 _logger.LogError(ex, "Failed to stop capture");
             }
         }
@@ -277,7 +282,7 @@ namespace FlowReveal.ViewModels
             _protocolParser.Clear();
             SelectedConversation = null;
             UpdateDetailPanel();
-            ConversationCountText = "Conversations: 0";
+            ConversationCountText = "会话: 0";
             _logger.LogInformation("Conversations cleared");
         }
 
@@ -323,7 +328,7 @@ namespace FlowReveal.ViewModels
             }
 
             IsSearchActive = true;
-            SearchResultCountText = $"{results.Count} match(es)";
+            SearchResultCountText = $"{results.Count} 个匹配结果";
 
             ApplyCurrentFilter();
 
@@ -410,7 +415,7 @@ namespace FlowReveal.ViewModels
         {
             Dispatcher.UIThread.Post(() =>
             {
-                StatisticsText = $"Packets: {stats.TotalPacketsCaptured} | Bytes: {stats.TotalBytesCaptured:N0} | Rate: {stats.PacketsPerSecond:F1} pkt/s";
+                StatisticsText = $"数据包: {stats.TotalPacketsCaptured} | 字节: {stats.TotalBytesCaptured:N0} | 速率: {stats.PacketsPerSecond:F1} 包/秒";
             });
         }
 
@@ -462,7 +467,7 @@ namespace FlowReveal.ViewModels
 
             RequestBodyText = conv.Request.Body.Length > 0
                 ? FormatBody(conv.Request.Body, conv.Request.ContentType)
-                : "(empty)";
+                : "(空)";
 
             if (conv.HasResponse)
             {
@@ -480,18 +485,18 @@ namespace FlowReveal.ViewModels
             }
             else
             {
-                ResponseHeadersText = "(waiting for response...)";
+                ResponseHeadersText = "(等待响应...)";
                 ResponseBodyText = "";
             }
 
             var timing = new StringBuilder();
-            timing.AppendLine($"Start: {conv.StartTime:HH:mm:ss.fff}");
-            timing.AppendLine($"End: {(conv.HasResponse ? conv.EndTime.ToString("HH:mm:ss.fff") : "pending")}");
-            timing.AppendLine($"Duration: {conv.Duration.TotalMilliseconds:F1} ms");
-            timing.AppendLine($"Request Size: {conv.Request.Body.Length:N0} bytes");
-            timing.AppendLine($"Response Size: {conv.Response.Body.Length:N0} bytes");
-            timing.AppendLine($"Total Size: {conv.TotalSize:N0} bytes");
-            timing.AppendLine($"HTTPS: {(conv.IsHttps ? "Yes" : "No")}");
+            timing.AppendLine($"开始时间: {conv.StartTime:HH:mm:ss.fff}");
+            timing.AppendLine($"结束时间: {(conv.HasResponse ? conv.EndTime.ToString("HH:mm:ss.fff") : "等待中")}");
+            timing.AppendLine($"持续时间: {conv.Duration.TotalMilliseconds:F1} ms");
+            timing.AppendLine($"请求大小: {conv.Request.Body.Length:N0} 字节");
+            timing.AppendLine($"响应大小: {conv.Response.Body.Length:N0} 字节");
+            timing.AppendLine($"总大小: {conv.TotalSize:N0} 字节");
+            timing.AppendLine($"HTTPS: {(conv.IsHttps ? "是" : "否")}");
             TimingText = timing.ToString();
         }
 
@@ -501,7 +506,7 @@ namespace FlowReveal.ViewModels
             var memoryMB = process.WorkingSet64 / (1024.0 * 1024.0);
             Dispatcher.UIThread.Post(() =>
             {
-                MemoryUsageText = $"Memory: {memoryMB:F1} MB";
+                MemoryUsageText = $"内存: {memoryMB:F1} MB";
             });
         }
 
@@ -528,7 +533,7 @@ namespace FlowReveal.ViewModels
 
         private string FormatBody(byte[] body, string contentType)
         {
-            if (body.Length == 0) return "(empty)";
+            if (body.Length == 0) return "(空)";
 
             var mode = (BodyDisplayMode)SelectedBodyDisplayMode;
 

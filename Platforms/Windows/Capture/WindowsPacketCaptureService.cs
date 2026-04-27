@@ -67,18 +67,18 @@ namespace FlowReveal.Platforms.Windows.Capture
         {
             if (_isCapturing)
             {
-                _logger.LogWarning("Capture already in progress, stopping first");
+                _logger.LogWarning("捕获已在进行中，先停止");
                 await StopCaptureAsync();
             }
 
             if (!_privilegeManager.IsRunningAsAdmin)
             {
-                _logger.LogCritical("Cannot start capture without Administrator privileges");
-                throw new UnauthorizedAccessException("Administrator privileges required for packet capture");
+                _logger.LogCritical("无法在没有管理员权限的情况下启动捕获");
+                throw new UnauthorizedAccessException("需要管理员权限才能进行数据包捕获");
             }
 
             _currentAdapter = adapter;
-            _logger.LogInformation("Starting raw socket capture on adapter: {AdapterName} (Index: {Index})",
+            _logger.LogInformation("开始原始套接字捕获，适配器: {AdapterName} (索引: {Index})",
                 adapter.FriendlyName, adapter.Index);
 
             try
@@ -108,17 +108,17 @@ namespace FlowReveal.Platforms.Windows.Capture
                 _droppedPackets = 0;
 
                 _isCapturing = true;
-                StatusChanged?.Invoke(this, $"Capturing on {adapter.FriendlyName}");
+                StatusChanged?.Invoke(this, $"正在捕获: {adapter.FriendlyName}");
 
                 _captureTask = Task.Run(() => CaptureLoop(_cts.Token), _cts.Token);
 
-                _logger.LogInformation("Raw socket capture started successfully on {Address}", bindAddress);
+                _logger.LogInformation("原始套接字捕获已成功在 {Address} 启动", bindAddress);
             }
             catch (Exception ex)
             {
                 _isCapturing = false;
-                _logger.LogError(ex, "Failed to start raw socket capture");
-                StatusChanged?.Invoke(this, "Capture failed to start");
+                _logger.LogError(ex, "启动原始套接字捕获失败");
+                StatusChanged?.Invoke(this, "捕获启动失败");
                 throw;
             }
 
@@ -129,23 +129,24 @@ namespace FlowReveal.Platforms.Windows.Capture
         {
             if (!_isCapturing)
             {
-                _logger.LogDebug("Capture not in progress, nothing to stop");
+                _logger.LogDebug("捕获未在进行中，无需停止");
                 return;
             }
 
-            _logger.LogInformation("Stopping raw socket capture...");
+            _logger.LogInformation("停止原始套接字捕获...");
 
             _isCapturing = false;
             _cts?.Cancel();
 
             try
             {
+                _captureSocket?.Shutdown(SocketShutdown.Both);
                 _captureSocket?.Close();
                 _captureSocket = null;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error closing capture socket");
+                _logger.LogWarning(ex, "关闭捕获套接字时出错");
             }
 
             if (_captureTask != null)
@@ -156,11 +157,11 @@ namespace FlowReveal.Platforms.Windows.Capture
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogDebug("Capture task cancelled as expected");
+                    _logger.LogDebug("捕获任务已按预期取消");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error waiting for capture task to complete");
+                    _logger.LogWarning(ex, "等待捕获任务完成时出错");
                 }
                 _captureTask = null;
             }
@@ -169,18 +170,19 @@ namespace FlowReveal.Platforms.Windows.Capture
             _cts?.Dispose();
             _cts = null;
 
-            StatusChanged?.Invoke(this, "Stopped");
+            StatusChanged?.Invoke(this, "已停止");
             StatisticsUpdated?.Invoke(this, _statistics);
 
-            _logger.LogInformation("Capture stopped. Total packets: {TotalPackets}, Dropped: {DroppedPackets}, Bytes: {TotalBytes}",
+            _logger.LogInformation("捕获已停止。总数据包: {TotalPackets}, 丢弃: {DroppedPackets}, 字节: {TotalBytes}",
                 _statistics.TotalPacketsCaptured, _statistics.TotalPacketsDropped, _statistics.TotalBytesCaptured);
         }
 
         private void CaptureLoop(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Capture loop started");
+            _logger.LogInformation("捕获循环已启动");
 
             var buffer = new byte[65535];
+            var lastStatsTime = DateTime.UtcNow;
 
             try
             {
@@ -188,75 +190,63 @@ namespace FlowReveal.Platforms.Windows.Capture
                 {
                     try
                     {
-                        if (_captureSocket == null || (!_captureSocket.Connected && _captureSocket.Available == 0))
+                        var bytesRead = _captureSocket?.Receive(buffer) ?? 0;
+                        if (bytesRead > 0)
                         {
-                            if (_captureSocket?.Available == 0)
-                            {
-                                var asyncResult = _captureSocket?.BeginReceive(buffer, 0, buffer.Length, SocketFlags.None, null, null);
-                                if (asyncResult != null)
-                                {
-                                    var waitHandles = new[] { asyncResult.AsyncWaitHandle, cancellationToken.WaitHandle };
-                                    var index = WaitHandle.WaitAny(waitHandles);
-
-                                    if (index == 1)
-                                    {
-                                        _logger.LogDebug("Capture loop cancelled via cancellation token");
-                                        break;
-                                    }
-
-                                    var bytesRead = _captureSocket?.EndReceive(asyncResult) ?? 0;
-                                    if (bytesRead > 0)
-                                    {
-                                        ProcessReceivedData(buffer, bytesRead);
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (_captureSocket.Available > 0)
-                            {
-                                var bytesRead = _captureSocket.Receive(buffer, 0, buffer.Length, SocketFlags.None);
-                                if (bytesRead > 0)
-                                {
-                                    ProcessReceivedData(buffer, bytesRead);
-                                }
-                            }
-                            else
-                            {
-                                Thread.Sleep(1);
-                            }
+                            ProcessReceivedData(buffer, bytesRead);
                         }
                     }
                     catch (SocketException ex) when (ex.SocketErrorCode == SocketError.Interrupted)
                     {
-                        _logger.LogDebug("Socket interrupted, exiting capture loop");
+                        _logger.LogDebug("套接字已中断，退出捕获循环");
+                        break;
+                    }
+                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+                    {
+                        _logger.LogDebug("套接字连接已重置，退出捕获循环");
+                        break;
+                    }
+                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted)
+                    {
+                        _logger.LogDebug("套接字操作已中止，退出捕获循环");
                         break;
                     }
                     catch (SocketException ex)
                     {
-                        _logger.LogWarning(ex, "Socket error in capture loop");
+                        _logger.LogWarning(ex, "捕获循环中的套接字错误");
                         if (cancellationToken.IsCancellationRequested) break;
                         Thread.Sleep(10);
                     }
                     catch (ObjectDisposedException)
                     {
-                        _logger.LogDebug("Socket disposed, exiting capture loop");
+                        _logger.LogDebug("套接字已释放，退出捕获循环");
                         break;
+                    }
+
+                    lock (_lock)
+                    {
+                        var now = DateTime.UtcNow;
+                        var elapsed = (now - lastStatsTime).TotalSeconds;
+                        if (elapsed >= 1.0)
+                        {
+                            _statistics.InstantPacketsPerSecond = _statistics.TotalPacketsCaptured / elapsed;
+                            lastStatsTime = now;
+                            StatisticsUpdated?.Invoke(this, _statistics);
+                        }
                     }
                 }
             }
             catch (OperationCanceledException)
             {
-                _logger.LogDebug("Capture loop cancelled");
+                _logger.LogDebug("捕获循环已取消");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error in capture loop");
+                _logger.LogError(ex, "捕获循环中出现意外错误");
             }
             finally
             {
-                _logger.LogInformation("Capture loop ended");
+                _logger.LogInformation("捕获循环已结束");
             }
         }
 
@@ -280,7 +270,7 @@ namespace FlowReveal.Platforms.Windows.Capture
                     SourcePort = parsed.SourcePort,
                     DestinationPort = parsed.DestinationPort,
                     Protocol = parsed.Protocol,
-                    NetworkInterface = _currentAdapter?.FriendlyName ?? "Unknown"
+                    NetworkInterface = _currentAdapter?.FriendlyName ?? "未知"
                 };
 
                 Array.Copy(buffer, packet.Data, bytesRead);
@@ -295,7 +285,7 @@ namespace FlowReveal.Platforms.Windows.Capture
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error processing received packet");
+                _logger.LogWarning(ex, "处理接收到的数据包时出错");
                 Interlocked.Increment(ref _droppedPackets);
             }
         }
@@ -308,7 +298,7 @@ namespace FlowReveal.Platforms.Windows.Capture
                 _adapters.Clear();
                 _adapters.AddRange(adapters);
             }
-            _logger.LogInformation("Adapter list refreshed: {Count} adapters available", _adapters.Count);
+            _logger.LogInformation("适配器列表已刷新: 可用适配器 {Count} 个", _adapters.Count);
         }
 
         public void Dispose()
@@ -321,13 +311,13 @@ namespace FlowReveal.Platforms.Windows.Capture
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error stopping capture during dispose");
+                    _logger.LogWarning(ex, "释放期间停止捕获时出错");
                 }
             }
 
             _captureSocket?.Dispose();
             _cts?.Dispose();
-            _logger.LogInformation("WindowsPacketCaptureService disposed");
+            _logger.LogInformation("WindowsPacketCaptureService 已释放");
         }
     }
 }

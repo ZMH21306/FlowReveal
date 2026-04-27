@@ -49,6 +49,8 @@ namespace FlowReveal.Services.Parser
         public DateTime LastActivityTime { get; set; } = DateTime.UtcNow;
         public uint ClientSeq { get; set; }
         public uint ServerSeq { get; set; }
+        public bool ClientSeqInitialized { get; set; }
+        public bool ServerSeqInitialized { get; set; }
         public List<byte> ClientData { get; } = new();
         public List<byte> ServerData { get; } = new();
         public SortedList<uint, byte[]> ClientOutOfOrder { get; } = new();
@@ -90,7 +92,7 @@ namespace FlowReveal.Services.Parser
                 return;
 
             int ipHeaderLength = (packet.Data[0] & 0x0F) * 4;
-            if (packet.Data.Length < ipHeaderLength + 20)
+            if (ipHeaderLength < 20 || packet.Data.Length < ipHeaderLength + 20)
                 return;
 
             int tcpOffset = ipHeaderLength;
@@ -123,6 +125,14 @@ namespace FlowReveal.Services.Parser
 
             var session = FindOrCreateSession(key);
             if (session == null)
+            {
+                if (payloadLength > 0)
+                {
+                    session = CreateLazySession(key, seqNumber, payloadLength);
+                }
+            }
+
+            if (session == null)
                 return;
 
             session.LastActivityTime = DateTime.UtcNow;
@@ -149,12 +159,36 @@ namespace FlowReveal.Services.Parser
             }
         }
 
+        private TcpReassemblySession? CreateLazySession(TcpSessionKey key, uint seqNumber, int payloadLength)
+        {
+            var session = new TcpReassemblySession(key)
+            {
+                State = TcpState.Established,
+                ClientSeq = seqNumber,
+                ClientSeqInitialized = true,
+                ServerSeqInitialized = true
+            };
+
+            var existingKey = key;
+            if (!_sessions.TryAdd(key, session))
+            {
+                if (!_sessions.TryGetValue(key, out session))
+                    return null;
+            }
+
+            _logger.LogDebug("Lazy TCP session created for existing data: {Key} seq={Seq} payload={Payload}",
+                key, seqNumber, payloadLength);
+
+            return session;
+        }
+
         private void HandleSyn(TcpSessionKey key, uint seqNumber)
         {
             var session = new TcpReassemblySession(key)
             {
                 State = TcpState.SynSent,
-                ClientSeq = seqNumber + 1
+                ClientSeq = seqNumber + 1,
+                ClientSeqInitialized = true
             };
 
             _sessions[key] = session;
@@ -168,60 +202,80 @@ namespace FlowReveal.Services.Parser
                 return session;
 
             var reverseKey = key.Reversed;
-            foreach (var kvp in _sessions)
-            {
-                if (kvp.Key.Equals(reverseKey))
-                    return kvp.Value;
-            }
+            if (_sessions.TryGetValue(reverseKey, out session))
+                return session;
 
             return null;
         }
 
         private void HandleData(TcpReassemblySession session, bool isClient, uint seqNumber, byte[] payload)
         {
-            var expectedSeq = isClient ? session.ClientSeq : session.ServerSeq;
             var buffer = isClient ? session.ClientData : session.ServerData;
             var outOfOrder = isClient ? session.ClientOutOfOrder : session.ServerOutOfOrder;
 
-            if (buffer.Count >= _maxSessionBufferSize)
+            if (!isClient ? session.ServerSeqInitialized : session.ClientSeqInitialized)
             {
-                _logger.LogWarning("Session {Key} buffer exceeded max size, dropping data", session.Key);
-                return;
-            }
-
-            if (seqNumber == expectedSeq)
-            {
-                buffer.AddRange(payload);
-                if (isClient)
+                if (session.State == TcpState.Established)
                 {
-                    session.ClientSeq = seqNumber + (uint)payload.Length;
-                    session.ClientBytesReceived += payload.Length;
+                    buffer.AddRange(payload);
+                    if (isClient)
+                    {
+                        session.ClientSeq = seqNumber + (uint)payload.Length;
+                        session.ClientBytesReceived += payload.Length;
+                    }
+                    else
+                    {
+                        session.ServerSeq = seqNumber + (uint)payload.Length;
+                        session.ServerBytesReceived += payload.Length;
+                    }
+                    SessionDataReceived?.Invoke(this, session);
                 }
                 else
                 {
-                    session.ServerSeq = seqNumber + (uint)payload.Length;
-                    session.ServerBytesReceived += payload.Length;
+                    outOfOrder[seqNumber] = payload;
                 }
-
-                ProcessOutOfOrderData(session, isClient);
-
-                if (session.State == TcpState.Established)
+            }
+            else
+            {
+                var expectedSeq = isClient ? session.ClientSeq : session.ServerSeq;
+                if (buffer.Count >= _maxSessionBufferSize)
                 {
-                    SessionDataReceived?.Invoke(this, session);
+                    _logger.LogWarning("Session {Key} buffer exceeded max size, dropping data", session.Key);
+                    return;
                 }
-            }
-            else if (IsSequenceAfter(seqNumber, expectedSeq))
-            {
-                outOfOrder[seqNumber] = payload;
-                _logger.LogDebug("Out-of-order segment: {Key} seq={Seq} expected={Expected} (isClient={IsClient})",
-                    session.Key, seqNumber, expectedSeq, isClient);
-            }
 
-            if (session.State == TcpState.SynSent || session.State == TcpState.SynReceived)
-            {
-                session.State = TcpState.Established;
-                _logger.LogInformation("TCP session established: {Key}", session.Key);
-                SessionEstablished?.Invoke(this, session);
+                if (seqNumber == expectedSeq)
+                {
+                    buffer.AddRange(payload);
+                    if (isClient)
+                    {
+                        session.ClientSeq = seqNumber + (uint)payload.Length;
+                        session.ClientBytesReceived += payload.Length;
+                    }
+                    else
+                    {
+                        session.ServerSeq = seqNumber + (uint)payload.Length;
+                        session.ServerBytesReceived += payload.Length;
+                    }
+
+                    if (isClient) session.ClientSeqInitialized = true;
+                    else session.ServerSeqInitialized = true;
+
+                    ProcessOutOfOrderData(session, isClient);
+
+                    if (session.State != TcpState.Established)
+                    {
+                        session.State = TcpState.Established;
+                        _logger.LogInformation("TCP session established: {Key}", session.Key);
+                        SessionEstablished?.Invoke(this, session);
+                    }
+                }
+                else if (IsSequenceAfter(seqNumber, expectedSeq))
+                {
+                    outOfOrder[seqNumber] = payload;
+                    _logger.LogDebug("Out-of-order segment: {Key} seq={Seq} expected={Expected} (isClient={IsClient})",
+                        session.Key, seqNumber, expectedSeq, isClient);
+                }
             }
         }
 
