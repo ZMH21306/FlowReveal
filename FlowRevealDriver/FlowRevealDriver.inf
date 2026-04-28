@@ -1,0 +1,44 @@
+[Version]
+Signature="$Windows NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+DriverVer=04/28/2026,1.0.0.0
+CatalogFile=FlowRevealDriver.cat
+
+[Manufacturer]
+%ManufacturerName%=Standard,NTamd64
+
+[Standard.NTamd64]
+%DeviceName%=FlowRevealDriver_Install, root\FlowReveal
+
+[SourceDisksNames]
+1=%DiskName%,,,""
+
+[SourceDisksFiles]
+FlowRevealDriver.sys=1
+
+[DestinationDirs]
+DefaultDestDir=12
+
+[FlowRevealDriver_Install.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+FlowRevealDriver.sys,,,0x00000040
+
+[FlowRevealDriver_Install.NT.Services]
+AddService=FlowRevealDriver,0x00000002,FlowRevealDriver_Service
+
+[FlowRevealDriver_Service]
+DisplayName=%ServiceName%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\FlowRevealDriver.sys
+
+[Strings]
+ManufacturerName="FlowReveal"
+DeviceName="FlowReveal Network Capture Driver"
+ServiceName="FlowRevealDriver"
+DiskName="FlowReveal Driver Disk"

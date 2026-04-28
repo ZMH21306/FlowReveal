@@ -1,29 +1,26 @@
-using System;
-using System.Linq;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Data.Core;
 using Avalonia.Data.Core.Plugins;
 using Avalonia.Markup.Xaml;
-using FlowReveal.Core.Interfaces;
-using FlowReveal.Platforms.Windows.Capture;
-using FlowReveal.Platforms.Windows.Network;
-using FlowReveal.Platforms.Windows.Security;
-using FlowReveal.Services.Analysis;
-using FlowReveal.Services.Filter;
-using FlowReveal.Services.Parser;
-using FlowReveal.Services.Session;
+using FlowReveal.Services;
 using FlowReveal.ViewModels;
 using FlowReveal.Views;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Serilog;
+using System;
+using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace FlowReveal
 {
     public partial class App : Application
     {
-        private ServiceProvider? _serviceProvider;
+        private ILifecycleService _lifecycleService = new LifecycleService();
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern int MessageBox(IntPtr hWnd, string text, string caption, int options);
+
+        private const int MB_OK = 0x00000000;
+        private const int MB_ICONERROR = 0x00000010;
 
         public override void Initialize()
         {
@@ -32,71 +29,55 @@ namespace FlowReveal
 
         public override void OnFrameworkInitializationCompleted()
         {
+            if (!_lifecycleService.CheckPrerequisites(out string message))
+            {
+                MessageBox(IntPtr.Zero, message, "FlowReveal", MB_OK | MB_ICONERROR);
+                Environment.Exit(1);
+                return;
+            }
+
+            if (!_lifecycleService.Initialize())
+            {
+                MessageBox(IntPtr.Zero, "初始化失败", "FlowReveal", MB_OK | MB_ICONERROR);
+                Environment.Exit(1);
+                return;
+            }
+
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
                 DisableAvaloniaDataAnnotationValidation();
-
-                var services = new ServiceCollection();
-                ConfigureServices(services);
-                _serviceProvider = services.BuildServiceProvider();
-
-                var mainViewModel = new MainWindowViewModel(
-                    _serviceProvider.GetRequiredService<IPacketCaptureService>(),
-                    _serviceProvider.GetRequiredService<IProtocolParser>(),
-                    _serviceProvider.GetRequiredService<IFilterEngine>(),
-                    _serviceProvider.GetRequiredService<SearchEngine>(),
-                    _serviceProvider.GetRequiredService<NetworkAdapterManager>(),
-                    _serviceProvider.GetRequiredService<ILogger<MainWindowViewModel>>()
-                );
-
+                
                 desktop.MainWindow = new MainWindow
                 {
-                    DataContext = mainViewModel,
+                    DataContext = new MainWindowViewModel(),
                 };
 
                 desktop.Exit += OnExit;
+                desktop.ShutdownRequested += OnShutdownRequested;
             }
 
             base.OnFrameworkInitializationCompleted();
         }
 
-        private void ConfigureServices(IServiceCollection services)
+        private void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
         {
-            services.AddLogging(builder =>
-            {
-                builder.ClearProviders();
-                builder.AddSerilog(Log.Logger, dispose: false);
-            });
-
-            services.AddSingleton<IProtocolParser, ProtocolParser>();
-            services.AddSingleton<IFilterEngine, FilterEngine>();
-            services.AddSingleton<ISessionStore, SessionStore>();
-            services.AddSingleton<PrivilegeManager>();
-            services.AddSingleton<CertificateManager>();
-            services.AddSingleton<HttpsProxyServer>();
-            services.AddSingleton<NetworkAdapterManager>();
-            services.AddSingleton<IPacketCaptureService, WindowsPacketCaptureService>();
-            services.AddSingleton<SearchEngine>();
-            services.AddSingleton<TrafficAnalyzer>();
+            Cleanup();
         }
 
-        private void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
+        private void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs e)
+        {
+            Cleanup();
+        }
+
+        private void Cleanup()
         {
             try
             {
-                var proxyServer = _serviceProvider?.GetService(typeof(HttpsProxyServer)) as HttpsProxyServer;
-                if (proxyServer != null && proxyServer.IsRunning)
-                {
-                    proxyServer.SetSystemProxy(false);
-                }
+                _lifecycleService?.Cleanup();
             }
-            catch (Exception ex)
+            catch
             {
-                Log.Error(ex, "Failed to restore system proxy on exit");
             }
-
-            Log.Information("Application exiting, disposing services");
-            _serviceProvider?.Dispose();
         }
 
         private void DisableAvaloniaDataAnnotationValidation()

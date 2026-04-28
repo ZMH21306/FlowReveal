@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "kJ8zkqIUjnA=",
+  "dgSpecHash": "nX8ArCzpiSs=",
   "success": true,
   "projectFilePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
   "expectedPackageFiles": [
@@ -8,7 +8,6 @@
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.angle.windows.natives\\2.1.25547.20250602\\avalonia.angle.windows.natives.2.1.25547.20250602.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.buildservices\\11.3.2\\avalonia.buildservices.11.3.2.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.controls.colorpicker\\11.3.12\\avalonia.controls.colorpicker.11.3.12.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\avalonia.controls.datagrid\\11.3.12\\avalonia.controls.datagrid.11.3.12.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.desktop\\11.3.12\\avalonia.desktop.11.3.12.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.diagnostics\\11.3.12\\avalonia.diagnostics.11.3.12.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.fonts.inter\\11.3.12\\avalonia.fonts.inter.11.3.12.nupkg.sha512",
@@ -27,24 +26,14 @@
     "C:\\Users\\21306\\.nuget\\packages\\harfbuzzsharp.nativeassets.webassembly\\8.3.1.1\\harfbuzzsharp.nativeassets.webassembly.8.3.1.1.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\harfbuzzsharp.nativeassets.win32\\8.3.1.1\\harfbuzzsharp.nativeassets.win32.8.3.1.1.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\microcom.runtime\\0.11.0\\microcom.runtime.0.11.0.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.dependencyinjection\\9.0.3\\microsoft.extensions.dependencyinjection.9.0.3.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\9.0.3\\microsoft.extensions.dependencyinjection.abstractions.9.0.3.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.logging\\9.0.3\\microsoft.extensions.logging.9.0.3.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.logging.abstractions\\9.0.3\\microsoft.extensions.logging.abstractions.9.0.3.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.options\\9.0.3\\microsoft.extensions.options.9.0.3.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.primitives\\9.0.3\\microsoft.extensions.primitives.9.0.3.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\serilog\\4.2.0\\serilog.4.2.0.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\serilog.enrichers.thread\\4.0.0\\serilog.enrichers.thread.4.0.0.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\serilog.extensions.logging\\8.0.0\\serilog.extensions.logging.8.0.0.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\serilog.sinks.console\\6.0.0\\serilog.sinks.console.6.0.0.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\serilog.sinks.file\\6.0.0\\serilog.sinks.file.6.0.0.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.dependencyinjection\\10.0.7\\microsoft.extensions.dependencyinjection.10.0.7.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\10.0.7\\microsoft.extensions.dependencyinjection.abstractions.10.0.7.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp\\2.88.9\\skiasharp.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.linux\\2.88.9\\skiasharp.nativeassets.linux.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.macos\\2.88.9\\skiasharp.nativeassets.macos.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.webassembly\\2.88.9\\skiasharp.nativeassets.webassembly.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.win32\\2.88.9\\skiasharp.nativeassets.win32.2.88.9.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\tmds.dbus.protocol\\0.21.2\\tmds.dbus.protocol.0.21.2.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.17763.57\\microsoft.windows.sdk.net.ref.10.0.17763.57.nupkg.sha512"
+    "C:\\Users\\21306\\.nuget\\packages\\tmds.dbus.protocol\\0.21.2\\tmds.dbus.protocol.0.21.2.nupkg.sha512"
   ],
   "logs": [
     {
@@ -56,7 +45,7 @@
       "filePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
       "libraryId": "Tmds.DBus.Protocol",
       "targetGraphs": [
-        "net10.0-windows10.0.17763"
+        "net10.0"
       ]
     }
   ]

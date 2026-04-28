@@ -1,6 +1,5 @@
 C:\Users\21306\.nuget\packages\avalonia\11.3.12\ref\net8.0\Avalonia.Base.dll
 C:\Users\21306\.nuget\packages\avalonia.controls.colorpicker\11.3.12\lib\net8.0\Avalonia.Controls.ColorPicker.dll
-C:\Users\21306\.nuget\packages\avalonia.controls.datagrid\11.3.12\lib\net8.0\Avalonia.Controls.DataGrid.dll
 C:\Users\21306\.nuget\packages\avalonia\11.3.12\ref\net8.0\Avalonia.Controls.dll
 C:\Users\21306\.nuget\packages\avalonia\11.3.12\ref\net8.0\Avalonia.DesignerSupport.dll
 C:\Users\21306\.nuget\packages\avalonia.desktop\11.3.12\lib\net8.0\Avalonia.Desktop.dll
@@ -27,23 +26,14 @@ C:\Users\21306\.nuget\packages\communitytoolkit.mvvm\8.2.1\lib\net6.0\CommunityT
 C:\Users\21306\.nuget\packages\harfbuzzsharp\8.3.1.1\lib\net8.0\HarfBuzzSharp.dll
 C:\Users\21306\.nuget\packages\microcom.runtime\0.11.0\lib\net5.0\MicroCom.Runtime.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\Microsoft.CSharp.dll
-C:\Users\21306\.nuget\packages\microsoft.extensions.dependencyinjection.abstractions\9.0.3\lib\net9.0\Microsoft.Extensions.DependencyInjection.Abstractions.dll
-C:\Users\21306\.nuget\packages\microsoft.extensions.dependencyinjection\9.0.3\lib\net9.0\Microsoft.Extensions.DependencyInjection.dll
-C:\Users\21306\.nuget\packages\microsoft.extensions.logging.abstractions\9.0.3\lib\net9.0\Microsoft.Extensions.Logging.Abstractions.dll
-C:\Users\21306\.nuget\packages\microsoft.extensions.logging\9.0.3\lib\net9.0\Microsoft.Extensions.Logging.dll
-C:\Users\21306\.nuget\packages\microsoft.extensions.options\9.0.3\lib\net9.0\Microsoft.Extensions.Options.dll
-C:\Users\21306\.nuget\packages\microsoft.extensions.primitives\9.0.3\lib\net9.0\Microsoft.Extensions.Primitives.dll
+C:\Users\21306\.nuget\packages\microsoft.extensions.dependencyinjection.abstractions\10.0.7\lib\net10.0\Microsoft.Extensions.DependencyInjection.Abstractions.dll
+C:\Users\21306\.nuget\packages\microsoft.extensions.dependencyinjection\10.0.7\lib\net10.0\Microsoft.Extensions.DependencyInjection.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\Microsoft.VisualBasic.Core.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\Microsoft.VisualBasic.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\Microsoft.Win32.Primitives.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\Microsoft.Win32.Registry.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\mscorlib.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\netstandard.dll
-C:\Users\21306\.nuget\packages\serilog\4.2.0\lib\net9.0\Serilog.dll
-C:\Users\21306\.nuget\packages\serilog.enrichers.thread\4.0.0\lib\net8.0\Serilog.Enrichers.Thread.dll
-C:\Users\21306\.nuget\packages\serilog.extensions.logging\8.0.0\lib\net8.0\Serilog.Extensions.Logging.dll
-C:\Users\21306\.nuget\packages\serilog.sinks.console\6.0.0\lib\net8.0\Serilog.Sinks.Console.dll
-C:\Users\21306\.nuget\packages\serilog.sinks.file\6.0.0\lib\net8.0\Serilog.Sinks.File.dll
 C:\Users\21306\.nuget\packages\skiasharp\2.88.9\lib\net6.0\SkiaSharp.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\System.AppContext.dll
 C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref\10.0.5\ref\net10.0\System.Buffers.dll

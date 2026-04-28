@@ -1,4 +1,3 @@
 <Solution>
   <Project Path="FlowReveal.csproj" />
-  <Project Path="FlowReveal.Tests\FlowReveal.Tests.csproj" />
 </Solution>
