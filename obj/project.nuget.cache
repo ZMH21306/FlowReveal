@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "pvJA0mHXpkc=",
+  "dgSpecHash": "78qln12v4sQ=",
   "success": true,
   "projectFilePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
   "expectedPackageFiles": [
@@ -8,6 +8,7 @@
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.angle.windows.natives\\2.1.25547.20250602\\avalonia.angle.windows.natives.2.1.25547.20250602.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.buildservices\\11.3.2\\avalonia.buildservices.11.3.2.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.controls.colorpicker\\11.3.12\\avalonia.controls.colorpicker.11.3.12.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\avalonia.controls.datagrid\\11.3.12\\avalonia.controls.datagrid.11.3.12.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.desktop\\11.3.12\\avalonia.desktop.11.3.12.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.diagnostics\\11.3.12\\avalonia.diagnostics.11.3.12.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\avalonia.fonts.inter\\11.3.12\\avalonia.fonts.inter.11.3.12.nupkg.sha512",
@@ -31,7 +32,10 @@
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.macos\\2.88.9\\skiasharp.nativeassets.macos.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.webassembly\\2.88.9\\skiasharp.nativeassets.webassembly.2.88.9.nupkg.sha512",
     "C:\\Users\\21306\\.nuget\\packages\\skiasharp.nativeassets.win32\\2.88.9\\skiasharp.nativeassets.win32.2.88.9.nupkg.sha512",
-    "C:\\Users\\21306\\.nuget\\packages\\tmds.dbus.protocol\\0.21.2\\tmds.dbus.protocol.0.21.2.nupkg.sha512"
+    "C:\\Users\\21306\\.nuget\\packages\\tmds.dbus.protocol\\0.21.2\\tmds.dbus.protocol.0.21.2.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\10.0.5\\microsoft.netcore.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\10.0.5\\microsoft.windowsdesktop.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\21306\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\10.0.5\\microsoft.aspnetcore.app.runtime.win-x64.10.0.5.nupkg.sha512"
   ],
   "logs": [
     {
@@ -43,7 +47,8 @@
       "filePath": "C:\\Users\\21306\\Desktop\\FlowReveal\\FlowReveal.csproj",
       "libraryId": "Tmds.DBus.Protocol",
       "targetGraphs": [
-        "net10.0"
+        "net10.0",
+        "net10.0/win-x64"
       ]
     }
   ]

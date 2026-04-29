@@ -1,3 +1,4 @@
+using FlowReveal.Services.Logging;
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -18,22 +19,36 @@ public class WfpRedirectService : IDisposable
     {
         _httpPort = httpPort;
         _httpsPort = httpsPort;
+        Logger.LogInfo($"WfpRedirectService initialized with HTTP port {httpPort}, HTTPS port {httpsPort}");
     }
 
     public bool Start()
     {
         if (_isStarted)
+        {
+            Logger.LogWarning("WFP service is already running");
             return true;
+        }
 
         try
         {
+            Logger.LogInfo("Opening WFP engine handle");
             uint result = WfpInterop.FwpmEngineOpen(out _engineHandle);
             if (result != 0)
+            {
+                Logger.LogError($"Failed to open WFP engine. Error code: {result}");
                 return false;
+            }
+            Logger.LogInfo("WFP engine opened successfully");
 
+            Logger.LogInfo("Starting WFP transaction");
             result = WfpInterop.FwpmTransactionBegin(_engineHandle);
             if (result != 0)
+            {
+                Logger.LogError($"Failed to begin WFP transaction. Error code: {result}");
                 return false;
+            }
+            Logger.LogInfo("WFP transaction started");
 
             if (!AddProvider())
                 return false;
@@ -44,15 +59,22 @@ public class WfpRedirectService : IDisposable
             if (!AddFilters())
                 return false;
 
+            Logger.LogInfo("Committing WFP transaction");
             result = WfpInterop.FwpmTransactionCommit(_engineHandle);
             if (result != 0)
+            {
+                Logger.LogError($"Failed to commit WFP transaction. Error code: {result}");
                 return false;
+            }
+            Logger.LogInfo("WFP transaction committed");
 
             _isStarted = true;
+            Logger.LogInfo("WFP redirect service started successfully");
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogError("Error starting WFP redirect service", ex);
             Cleanup();
             return false;
         }
@@ -61,61 +83,107 @@ public class WfpRedirectService : IDisposable
     public bool Stop()
     {
         if (!_isStarted)
+        {
+            Logger.LogWarning("WFP service is not running");
             return true;
+        }
 
         try
         {
+            Logger.LogInfo("Stopping WFP redirect service");
             Cleanup();
             _isStarted = false;
+            Logger.LogInfo("WFP redirect service stopped");
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogError("Error stopping WFP redirect service", ex);
             return false;
         }
     }
 
     private bool AddProvider()
     {
-        FWPM_PROVIDER0 provider = new();
-        Guid key = _providerKey;
-        provider.providerKey = key;
-        provider.name = Marshal.StringToHGlobalUni("FlowReveal Provider");
-        provider.description = Marshal.StringToHGlobalUni("FlowReveal HTTP Debugger Traffic Redirect");
-        provider.flags = 0;
+        try
+        {
+            FWPM_PROVIDER0 provider = new();
+            Guid key = _providerKey;
+            provider.providerKey = key;
+            provider.name = Marshal.StringToHGlobalUni("FlowReveal Provider");
+            provider.description = Marshal.StringToHGlobalUni("FlowReveal HTTP Debugger Traffic Redirect");
+            provider.flags = 0;
 
-        uint result = WfpInterop.FwpmProviderAdd(_engineHandle, ref provider, IntPtr.Zero);
+            Logger.LogInfo("Adding WFP provider");
+            uint result = WfpInterop.FwpmProviderAdd(_engineHandle, ref provider, IntPtr.Zero);
 
-        Marshal.FreeHGlobal(provider.name);
-        Marshal.FreeHGlobal(provider.description);
+            Marshal.FreeHGlobal(provider.name);
+            Marshal.FreeHGlobal(provider.description);
 
-        return result == 0;
+            if (result != 0)
+            {
+                Logger.LogError($"Failed to add WFP provider. Error code: {result}");
+                return false;
+            }
+            Logger.LogInfo("WFP provider added successfully");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("Error adding WFP provider", ex);
+            return false;
+        }
     }
 
     private bool AddSubLayer()
     {
-        FWPM_SUBLAYER0 subLayer = new();
-        Guid subKey = _subLayerKey;
-        Guid provKey = _providerKey;
-        subLayer.subLayerKey = subKey;
-        subLayer.providerKey = provKey;
-        subLayer.name = Marshal.StringToHGlobalUni("FlowReveal SubLayer");
-        subLayer.description = Marshal.StringToHGlobalUni("FlowReveal HTTP Debugger SubLayer");
-        subLayer.flags = 0;
-        subLayer.weight = 0xFFFF;
+        try
+        {
+            FWPM_SUBLAYER0 subLayer = new();
+            Guid subKey = _subLayerKey;
+            Guid provKey = _providerKey;
+            subLayer.subLayerKey = subKey;
+            subLayer.providerKey = provKey;
+            subLayer.name = Marshal.StringToHGlobalUni("FlowReveal SubLayer");
+            subLayer.description = Marshal.StringToHGlobalUni("FlowReveal HTTP Debugger SubLayer");
+            subLayer.flags = 0;
+            subLayer.weight = 0xFFFF;
 
-        uint result = WfpInterop.FwpmSubLayerAdd(_engineHandle, ref subLayer, IntPtr.Zero);
+            Logger.LogInfo("Adding WFP sublayer");
+            uint result = WfpInterop.FwpmSubLayerAdd(_engineHandle, ref subLayer, IntPtr.Zero);
 
-        Marshal.FreeHGlobal(subLayer.name);
-        Marshal.FreeHGlobal(subLayer.description);
+            Marshal.FreeHGlobal(subLayer.name);
+            Marshal.FreeHGlobal(subLayer.description);
 
-        return result == 0;
+            if (result != 0)
+            {
+                Logger.LogError($"Failed to add WFP sublayer. Error code: {result}");
+                return false;
+            }
+            Logger.LogInfo("WFP sublayer added successfully");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("Error adding WFP sublayer", ex);
+            return false;
+        }
     }
 
     private bool AddFilters()
     {
+        Logger.LogInfo("Adding WFP filters");
         bool httpResult = AddRedirectFilter(_httpPort, "HTTP Redirect");
         bool httpsResult = AddRedirectFilter(_httpsPort, "HTTPS Redirect");
+
+        if (httpResult && httpsResult)
+        {
+            Logger.LogInfo("WFP filters added successfully");
+        }
+        else
+        {
+            Logger.LogError("Failed to add WFP filters");
+        }
 
         return httpResult && httpsResult;
     }
@@ -124,6 +192,8 @@ public class WfpRedirectService : IDisposable
     {
         try
         {
+            Logger.LogInfo($"Adding filter: {name} for port {port}");
+
             FWPM_FILTER0 filter = new();
             filter.filterKey = Guid.NewGuid();
             
@@ -176,33 +246,46 @@ public class WfpRedirectService : IDisposable
             Marshal.FreeHGlobal(conditions[1].conditionValue);
             Marshal.FreeHGlobal(actionPtr);
 
-            return result == 0;
+            if (result != 0)
+            {
+                Logger.LogError($"Failed to add filter {name}. Error code: {result}");
+                return false;
+            }
+            Logger.LogInfo($"Filter {name} added successfully with ID: {filterId}");
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogError($"Error adding filter {name}", ex);
             return false;
         }
     }
 
     private void Cleanup()
     {
+        Logger.LogInfo("Cleaning up WFP resources");
         if (_engineHandle != IntPtr.Zero)
         {
             foreach (ulong filterId in _filterIds)
             {
+                Logger.LogInfo($"Deleting filter ID: {filterId}");
                 WfpInterop.FwpmFilterDeleteById(_engineHandle, filterId);
             }
             _filterIds.Clear();
 
             Guid subKey = _subLayerKey;
+            Logger.LogInfo("Deleting sublayer");
             WfpInterop.FwpmSubLayerDeleteByKey(_engineHandle, ref subKey);
             
             Guid provKey = _providerKey;
+            Logger.LogInfo("Deleting provider");
             WfpInterop.FwpmProviderDeleteByKey(_engineHandle, ref provKey);
             
+            Logger.LogInfo("Closing WFP engine");
             WfpInterop.FwpmEngineClose(_engineHandle);
             _engineHandle = IntPtr.Zero;
         }
+        Logger.LogInfo("WFP resources cleaned up");
     }
 
     public void Dispose()
