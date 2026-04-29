@@ -7,117 +7,179 @@
         x:Class="FlowReveal.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Icon="/Assets/avalonia-logo.ico"
-        Title="FlowReveal">
-
-    <Window.Styles>
-        <Style Selector="Button">
-            <Setter Property="Margin" Value="4"/>
-            <Setter Property="Padding" Value="8,4"/>
-        </Style>
-        <Style Selector="TextBox">
-            <Setter Property="Margin" Value="4"/>
-            <Setter Property="Padding" Value="4"/>
-            <Setter Property="Width" Value="150"/>
-        </Style>
-        <Style Selector="Border.TableHeader">
-            <Setter Property="Background" Value="#F0F0F0"/>
-            <Setter Property="BorderThickness" Value="0,0,0,1"/>
-            <Setter Property="BorderBrush" Value="#E0E0E0"/>
-        </Style>
-        <Style Selector="Grid.TableRow">
-            <Setter Property="Background" Value="White"/>
-        </Style>
-        <Style Selector="Grid.TableRow:selected">
-            <Setter Property="Background" Value="#E3F2FD"/>
-        </Style>
-    </Window.Styles>
+        Title="FlowReveal HTTP Debugger">
 
     <Design.DataContext>
-        <!-- This only sets the DataContext for the previewer in an IDE,
-             to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-
-        <!-- 控制栏 -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8" Spacing="8">
-            <Button Command="{Binding StartCommand}" Content="启动" IsEnabled="{Binding !IsRunning}"/>
-            <Button Command="{Binding StopCommand}" Content="停止" IsEnabled="{Binding IsRunning}"/>
-            <TextBlock Text="状态: " VerticalAlignment="Center"/>
-            <TextBlock Text="{Binding IsRunning}" VerticalAlignment="Center"/>
+    <Grid RowDefinitions="Auto,*,*">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Margin="8" Background="{DynamicResource SystemControlBackgroundAccentBrush}">
+            <Button Command="{Binding TrafficGrid.StartCaptureCommand}" 
+                    IsEnabled="{Binding !TrafficGrid.IsCapturing}"
+                    HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="M19 12V7H5v5h14m0 5H5v-2h14v2z"/>
+                    <TextBlock Text="Start"/>
+                </StackPanel>
+            </Button>
+            <Button Command="{Binding TrafficGrid.StopCaptureCommand}" 
+                    IsEnabled="{Binding TrafficGrid.IsCapturing}">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="M6 6h12v12H6z"/>
+                    <TextBlock Text="Stop"/>
+                </StackPanel>
+            </Button>
+            <Button Command="{Binding TrafficGrid.ClearRecordsCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="M19 6H5v12h14V6zm-7 8l-4-4 1.41-1.41L12 10.17l6.59-6.59L20 4l-8 8z"/>
+                    <TextBlock Text="Clear"/>
+                </StackPanel>
+            </Button>
+            
+            <Separator Height="24" Width="1" Margin="0 4"/>
+            
+            <TextBox Watermark="Search..." 
+                     Text="{Binding TrafficGrid.SearchText, Mode=TwoWay}"
+                     Width="200"/>
+            
+            <Separator Height="24" Width="1" Margin="0 4"/>
+            
+            <ComboBox PlaceholderText="Method" 
+                      SelectedItem="{Binding TrafficGrid.MethodFilter, Mode=TwoWay}"
+                      Width="80">
+                <ComboBoxItem Content=""/>
+                <ComboBoxItem Content="GET"/>
+                <ComboBoxItem Content="POST"/>
+                <ComboBoxItem Content="PUT"/>
+                <ComboBoxItem Content="DELETE"/>
+                <ComboBoxItem Content="PATCH"/>
+                <ComboBoxItem Content="CONNECT"/>
+            </ComboBox>
+            
+            <ComboBox PlaceholderText="Status" 
+                      SelectedItem="{Binding TrafficGrid.StatusCodeFilter, Mode=TwoWay}"
+                      Width="80">
+                <ComboBoxItem Content=""/>
+                <ComboBoxItem Content="1xx"/>
+                <ComboBoxItem Content="2xx"/>
+                <ComboBoxItem Content="3xx"/>
+                <ComboBoxItem Content="4xx"/>
+                <ComboBoxItem Content="5xx"/>
+            </ComboBox>
         </StackPanel>
 
-        <!-- 筛选栏 -->
-        <Grid Grid.Row="1" Margin="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="150"/>
-                <ColumnDefinition Width="150"/>
-                <ColumnDefinition Width="150"/>
-            </Grid.ColumnDefinitions>
-            <TextBox Grid.Column="0" Text="{Binding SearchText, Mode=TwoWay}" Watermark="搜索 URL..."/>
-            <TextBox Grid.Column="1" Text="{Binding MethodFilter, Mode=TwoWay}" Watermark="方法 (GET/POST)..."/>
-            <TextBox Grid.Column="2" Text="{Binding StatusCodeFilter, Mode=TwoWay}" Watermark="状态码..."/>
-            <TextBox Grid.Column="3" Text="{Binding ProcessFilter, Mode=TwoWay}" Watermark="进程名..."/>
-        </Grid>
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding TrafficGrid.Records}"
+                  SelectedItem="{Binding SelectedRecord, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  CanUserSortColumns="True"
+                  CanUserResizeColumns="True"
+                  IsReadOnly="True">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time" 
+                                   Binding="{Binding Timestamp, StringFormat='HH:mm:ss.fff'}"
+                                   Width="120"/>
+                <DataGridTextColumn Header="Method" 
+                                   Binding="{Binding Method}"
+                                   Width="80"/>
+                <DataGridTextColumn Header="URL" 
+                                   Binding="{Binding Url}"
+                                   Width="*"/>
+                <DataGridTextColumn Header="Status" 
+                                   Binding="{Binding StatusCode}"
+                                   Width="70"/>
+                <DataGridTextColumn Header="Time (ms)" 
+                                   Binding="{Binding ResponseTimeMs}"
+                                   Width="90"/>
+                <DataGridTextColumn Header="Req Size" 
+                                   Binding="{Binding RequestSize}"
+                                   Width="90"/>
+                <DataGridTextColumn Header="Res Size" 
+                                   Binding="{Binding ResponseSize}"
+                                   Width="90"/>
+            </DataGrid.Columns>
+        </DataGrid>
 
-        <!-- 表格表头 -->
-        <Border Grid.Row="2" Classes="TableHeader">
-            <Grid ColumnDefinitions="200,80,*,80,100,100,100,150">
-                <Button Grid.Column="0" Content="时间" Command="{Binding SortCommand}" CommandParameter="Timestamp"/>
-                <Button Grid.Column="1" Content="方法" Command="{Binding SortCommand}" CommandParameter="Method"/>
-                <Button Grid.Column="2" Content="URL" Command="{Binding SortCommand}" CommandParameter="Url"/>
-                <Button Grid.Column="3" Content="状态码" Command="{Binding SortCommand}" CommandParameter="StatusCode"/>
-                <Button Grid.Column="4" Content="响应时间" Command="{Binding SortCommand}" CommandParameter="ResponseTimeMs"/>
-                <Button Grid.Column="5" Content="请求大小" Command="{Binding SortCommand}" CommandParameter="RequestSize"/>
-                <Button Grid.Column="6" Content="响应大小" Command="{Binding SortCommand}" CommandParameter="ResponseSize"/>
-                <Button Grid.Column="7" Content="进程" Command="{Binding SortCommand}" CommandParameter="ProcessName"/>
-            </Grid>
-        </Border>
-
-        <!-- 表格内容 -->
-        <ScrollViewer Grid.Row="2" Margin="0,30,0,0">
-            <ItemsControl ItemsSource="{Binding FilteredLogs}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Grid ColumnDefinitions="200,80,*,80,100,100,100,150" Classes="TableRow">
-                            <TextBlock Grid.Column="0" Text="{Binding Timestamp, StringFormat='yyyy-MM-dd HH:mm:ss.fff'}" Margin="4"/>
-                            <TextBlock Grid.Column="1" Text="{Binding Method}" Margin="4" FontWeight="Bold"/>
-                            <TextBlock Grid.Column="2" Text="{Binding Url}" Margin="4" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Grid.Column="3" Text="{Binding StatusCode}" Margin="4"/>
-                            <TextBlock Grid.Column="4" Text="{Binding ResponseTimeMs} ms" Margin="4"/>
-                            <TextBlock Grid.Column="5" Text="{Binding RequestSize} B" Margin="4"/>
-                            <TextBlock Grid.Column="6" Text="{Binding ResponseSize} B" Margin="4"/>
-                            <TextBlock Grid.Column="7" Text="{Binding ProcessName}" Margin="4"/>
-                        </Grid>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
-
-        <!-- 详情面板 -->
-        <Border Grid.Row="3" BorderThickness="1" BorderBrush="#E0E0E0" Margin="8">
-            <Grid RowDefinitions="Auto,*">
-                <TextBlock Text="请求详情" FontWeight="Bold" Margin="8"/>
-                <StackPanel Grid.Row="1" Margin="8" Spacing="8">
-                    <TextBlock Text="请求头:" FontWeight="Bold"/>
-                    <TextBlock Text="{Binding SelectedLog.RequestHeaders}" TextWrapping="Wrap"/>
-                    <TextBlock Text="请求体:" FontWeight="Bold"/>
-                    <TextBlock Text="{Binding SelectedLog.RequestBody}" TextWrapping="Wrap"/>
-                    <TextBlock Text="响应头:" FontWeight="Bold"/>
-                    <TextBlock Text="{Binding SelectedLog.ResponseHeaders}" TextWrapping="Wrap"/>
-                    <TextBlock Text="响应体:" FontWeight="Bold"/>
-                    <TextBlock Text="{Binding SelectedLog.ResponseBody}" TextWrapping="Wrap"/>
-                </StackPanel>
-                <TextBlock Grid.Row="1" Text="请选择一条日志查看详情" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Grid>
-        </Border>
+        <TabControl Grid.Row="2">
+            <TabItem Header="Headers">
+                <Grid ColumnDefinitions="*,*">
+                    <Grid RowDefinitions="Auto,*">
+                        <TextBlock Text="Request Headers" FontWeight="Bold" Margin="4"/>
+                        <TextBox Grid.Row="1" 
+                                 Text="{Binding DetailPanel.RequestHeadersText}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"/>
+                    </Grid>
+                    <Grid Grid.Column="1" RowDefinitions="Auto,*">
+                        <TextBlock Text="Response Headers" FontWeight="Bold" Margin="4"/>
+                        <TextBox Grid.Row="1" 
+                                 Text="{Binding DetailPanel.ResponseHeadersText}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Body">
+                <Grid ColumnDefinitions="*,*">
+                    <Grid RowDefinitions="Auto,*">
+                        <TextBlock Text="Request Body" FontWeight="Bold" Margin="4"/>
+                        <TextBox Grid.Row="1" 
+                                 Text="{Binding DetailPanel.RequestBodyText}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"/>
+                    </Grid>
+                    <Grid Grid.Column="1" RowDefinitions="Auto,*">
+                        <TextBlock Text="Response Body" FontWeight="Bold" Margin="4"/>
+                        <TextBox Grid.Row="1" 
+                                 Text="{Binding DetailPanel.ResponseBodyText}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Raw">
+                <Grid ColumnDefinitions="*,*">
+                    <Grid RowDefinitions="Auto,*">
+                        <TextBlock Text="Raw Request" FontWeight="Bold" Margin="4"/>
+                        <TextBox Grid.Row="1" 
+                                 Text="{Binding DetailPanel.RawRequest}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"/>
+                    </Grid>
+                    <Grid Grid.Column="1" RowDefinitions="Auto,*">
+                        <TextBlock Text="Raw Response" FontWeight="Bold" Margin="4"/>
+                        <TextBox Grid.Row="1" 
+                                 Text="{Binding DetailPanel.RawResponse}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Timing">
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                    <StackPanel Orientation="Horizontal" Margin="4">
+                        <TextBlock Text="DNS Lookup: " Width="120"/>
+                        <TextBlock Text="{Binding DetailPanel.Record.DnsLookupTimeMs} ms"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="4">
+                        <TextBlock Text="Connection: " Width="120"/>
+                        <TextBlock Text="{Binding DetailPanel.Record.ConnectionTimeMs} ms"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="4">
+                        <TextBlock Text="TLS Handshake: " Width="120"/>
+                        <TextBlock Text="{Binding DetailPanel.Record.TlsHandshakeTimeMs} ms"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="4">
+                        <TextBlock Text="Time to First Byte: " Width="120"/>
+                        <TextBlock Text="{Binding DetailPanel.Record.TimeToFirstByteMs} ms"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="4">
+                        <TextBlock Text="Total Response: " Width="120"/>
+                        <TextBlock Text="{Binding DetailPanel.Record.ResponseTimeMs} ms"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+        </TabControl>
     </Grid>
 </Window>
