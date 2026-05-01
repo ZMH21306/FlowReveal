@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { CaptureConfig, CertificateAuthority } from "../types";
+import type { CaptureConfig, CertificateAuthority, ProcessEntry } from "../types";
 
 export async function startCapture(config: CaptureConfig): Promise<void> {
   return invoke("start_capture", { config });
@@ -38,4 +38,20 @@ export async function exportHar(sessionIds: number[]): Promise<string> {
 
 export async function replayRequest(sessionId: number): Promise<void> {
   return invoke("replay_request", { sessionId });
+}
+
+export async function listRunningProcesses(): Promise<ProcessEntry[]> {
+  return invoke("list_running_processes");
+}
+
+export async function injectHook(pid: number): Promise<void> {
+  return invoke("inject_hook", { pid });
+}
+
+export async function ejectHook(pid: number): Promise<void> {
+  return invoke("eject_hook", { pid });
+}
+
+export async function getInjectedPids(): Promise<number[]> {
+  return invoke("get_injected_pids");
 }
