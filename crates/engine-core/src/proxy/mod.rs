@@ -1,6 +1,5 @@
 pub mod forward_proxy;
 pub mod transparent_proxy;
+pub mod mitm_proxy;
 
-pub struct ProxyShutdownHandle {
-    pub shutdown_tx: tokio::sync::oneshot::Sender<()>,
-}
+pub use forward_proxy::ForwardProxyHandle;
