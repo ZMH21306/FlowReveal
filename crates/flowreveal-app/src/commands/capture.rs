@@ -26,15 +26,21 @@ pub async fn start_capture(
     }
 
     let port = config.proxy_port;
-    let mut proxy = ForwardProxy::new(port, config.clone());
+    tracing::info!("Starting capture on port {}", port);
 
-    proxy
-        .start(tx)
+    let handle = ForwardProxy::start(port, &config, tx)
         .await
         .map_err(|e| format!("Failed to start proxy: {}", e))?;
 
+    tracing::info!("Proxy started successfully on port {}", port);
+
     *state.capture_status.write().await = CaptureStatus::Running;
     *state.config.write().await = Some(config);
+
+    {
+        let mut shutdown = state.shutdown_handle.lock().await;
+        *shutdown = Some(handle);
+    }
 
     let sessions = state.sessions.clone();
     let stats = state.stats.clone();
@@ -80,6 +86,14 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
     }
     *status = CaptureStatus::Idle;
     drop(status);
+
+    {
+        let mut shutdown = state.shutdown_handle.lock().await;
+        if let Some(handle) = shutdown.take() {
+            let _ = handle.shutdown_tx.send(());
+            tracing::info!("Proxy shutdown signal sent");
+        }
+    }
 
     {
         let mut event_tx = state.event_tx.lock().await;

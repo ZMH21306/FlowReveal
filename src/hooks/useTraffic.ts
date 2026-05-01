@@ -4,12 +4,12 @@ import type { HttpMessage, EngineStats } from "../types";
 import { useStore } from "../store";
 
 export function useTraffic() {
-  const addRequest = useStore((s) => s.addRequest);
+  const processMessage = useStore((s) => s.processMessage);
   const setStats = useStore((s) => s.setStats);
 
   useEffect(() => {
     const unlistenRequest = listen<HttpMessage>("traffic:request", (event) => {
-      addRequest(event.payload);
+      processMessage(event.payload);
     });
 
     const unlistenStats = listen<EngineStats>("traffic:stats", (event) => {
@@ -20,5 +20,5 @@ export function useTraffic() {
       unlistenRequest.then((fn) => fn());
       unlistenStats.then((fn) => fn());
     };
-  }, [addRequest, setStats]);
+  }, [processMessage, setStats]);
 }

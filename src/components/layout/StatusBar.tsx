@@ -22,9 +22,6 @@ export function StatusBar() {
       <span>Sessions: {stats.total_sessions}</span>
       <span>Active: {stats.active_sessions}</span>
       <span>Data: {formatSize(stats.bytes_captured)}</span>
-      {stats.tls_handshakes > 0 && (
-        <span>TLS: {stats.tls_handshakes}</span>
-      )}
     </div>
   );
 }

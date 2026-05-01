@@ -1,13 +1,14 @@
 import { create } from "zustand";
-import type { HttpMessage, CaptureStatus, EngineStats } from "../types";
+import type { HttpMessage, HttpSession, CaptureStatus, EngineStats } from "../types";
 
 interface TrafficState {
-  requests: HttpMessage[];
+  sessions: Map<number, HttpSession>;
+  sessionList: number[];
   selectedId: number | null;
   captureStatus: CaptureStatus;
   stats: EngineStats;
 
-  addRequest: (msg: HttpMessage) => void;
+  processMessage: (msg: HttpMessage) => void;
   clearRequests: () => void;
   selectRequest: (id: number | null) => void;
   setCaptureStatus: (status: CaptureStatus) => void;
@@ -15,7 +16,8 @@ interface TrafficState {
 }
 
 export const useStore = create<TrafficState>((set) => ({
-  requests: [],
+  sessions: new Map(),
+  sessionList: [],
   selectedId: null,
   captureStatus: "Idle",
   stats: {
@@ -30,10 +32,37 @@ export const useStore = create<TrafficState>((set) => ({
     filtered_out: 0,
   },
 
-  addRequest: (msg) =>
-    set((state) => ({ requests: [...state.requests, msg] })),
+  processMessage: (msg) =>
+    set((state) => {
+      const newSessions = new Map(state.sessions);
+      const newSessionList = [...state.sessionList];
 
-  clearRequests: () => set({ requests: [], selectedId: null }),
+      if (msg.direction === "Request") {
+        const session: HttpSession = {
+          id: msg.session_id,
+          request: msg,
+          response: null,
+          created_at: msg.timestamp,
+          completed_at: null,
+        };
+        newSessions.set(msg.session_id, session);
+        newSessionList.push(msg.session_id);
+      } else {
+        const existing = newSessions.get(msg.session_id);
+        if (existing) {
+          const updated: HttpSession = {
+            ...existing,
+            response: msg,
+            completed_at: msg.timestamp,
+          };
+          newSessions.set(msg.session_id, updated);
+        }
+      }
+
+      return { sessions: newSessions, sessionList: newSessionList };
+    }),
+
+  clearRequests: () => set({ sessions: new Map(), sessionList: [], selectedId: null }),
 
   selectRequest: (id) => set({ selectedId: id }),
 
