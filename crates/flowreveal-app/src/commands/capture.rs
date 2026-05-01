@@ -1,9 +1,10 @@
 use tauri::{command, State, AppHandle, Emitter};
 use crate::state::AppState;
-use engine_core::capture_config::CaptureConfig;
+use engine_core::capture_config::{CaptureConfig, CaptureMode};
 use engine_core::engine_stats::CaptureStatus;
 use engine_core::http_message::{HttpMessage, HttpSession};
 use engine_core::proxy::forward_proxy::ForwardProxy;
+use engine_core::proxy::ProxyShutdownHandle;
 use tokio::sync::mpsc;
 
 #[command]
@@ -12,11 +13,12 @@ pub async fn start_capture(
     state: State<'_, AppState>,
     config: CaptureConfig,
 ) -> Result<(), String> {
-    let status = state.capture_status.read().await;
-    if *status == CaptureStatus::Running {
-        return Err("Capture is already running".to_string());
+    {
+        let status = state.capture_status.read().await;
+        if *status == CaptureStatus::Running {
+            return Err("Capture is already running".to_string());
+        }
     }
-    drop(status);
 
     let (tx, mut rx) = mpsc::channel::<HttpMessage>(1024);
 
@@ -26,20 +28,54 @@ pub async fn start_capture(
     }
 
     let port = config.proxy_port;
-    tracing::info!("Starting capture on port {}", port);
-
-    let handle = ForwardProxy::start(port, &config, tx)
-        .await
-        .map_err(|e| format!("Failed to start proxy: {}", e))?;
-
-    tracing::info!("Proxy started successfully on port {}", port);
+    let mode = config.mode;
+    tracing::info!("Starting capture in {:?} mode on port {}", mode, port);
 
     *state.capture_status.write().await = CaptureStatus::Running;
+
+    let shutdown_tx = match mode {
+        CaptureMode::ForwardProxy => {
+            match ForwardProxy::start(port, &config, tx).await {
+                Ok(handle) => handle.shutdown_tx,
+                Err(e) => {
+                    *state.capture_status.write().await = CaptureStatus::Idle;
+                    tracing::error!("Failed to start forward proxy: {}", e);
+                    return Err(format!("Failed to start forward proxy: {}", e));
+                }
+            }
+        }
+        CaptureMode::TransparentProxy => {
+            #[cfg(target_os = "windows")]
+            {
+                use engine_core::proxy::transparent_proxy::TransparentProxy;
+                match TransparentProxy::start(port, &config, tx).await {
+                    Ok(handle) => handle.shutdown_tx,
+                    Err(e) => {
+                        *state.capture_status.write().await = CaptureStatus::Idle;
+                        tracing::error!("Failed to start transparent proxy: {}", e);
+                        return Err(format!("Failed to start transparent proxy: {}", e));
+                    }
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                *state.capture_status.write().await = CaptureStatus::Idle;
+                return Err("Transparent proxy is only supported on Windows".to_string());
+            }
+        }
+        CaptureMode::ApiHook => {
+            *state.capture_status.write().await = CaptureStatus::Idle;
+            return Err("API Hook mode is not yet implemented".to_string());
+        }
+    };
+
+    tracing::info!("Proxy started successfully in {:?} mode on port {}", mode, port);
+
     *state.config.write().await = Some(config);
 
     {
         let mut shutdown = state.shutdown_handle.lock().await;
-        *shutdown = Some(handle);
+        *shutdown = Some(ProxyShutdownHandle { shutdown_tx });
     }
 
     let sessions = state.sessions.clone();
@@ -74,18 +110,18 @@ pub async fn start_capture(
         }
     });
 
-    tracing::info!("Capture started on port {}", port);
+    tracing::info!("Capture started in {:?} mode on port {}", mode, port);
     Ok(())
 }
 
 #[command]
 pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
-    let mut status = state.capture_status.write().await;
-    if *status != CaptureStatus::Running {
-        return Err("Capture is not running".to_string());
+    {
+        let status = state.capture_status.read().await;
+        if *status != CaptureStatus::Running {
+            return Err("Capture is not running".to_string());
+        }
     }
-    *status = CaptureStatus::Idle;
-    drop(status);
 
     {
         let mut shutdown = state.shutdown_handle.lock().await;
@@ -95,10 +131,26 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        let config = state.config.read().await;
+        if let Some(cfg) = config.as_ref() {
+            if cfg.mode == CaptureMode::TransparentProxy {
+                use engine_core::proxy::transparent_proxy::wfp_engine;
+                if let Err(e) = wfp_engine::uninstall_redirect_filters() {
+                    tracing::warn!("Failed to uninstall WFP filters: {}", e);
+                }
+            }
+        }
+    }
+
     {
         let mut event_tx = state.event_tx.lock().await;
         *event_tx = None;
     }
+
+    *state.capture_status.write().await = CaptureStatus::Idle;
+    *state.config.write().await = None;
 
     tracing::info!("Capture stopped");
     Ok(())
