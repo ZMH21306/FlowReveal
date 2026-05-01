@@ -22,13 +22,11 @@ pub extern "system" fn DllMain(_hinst: *mut c_void, reason: u32, _reserved: *mut
                     G_HOOKS_INSTALLED = true;
                 }
 
+                std::thread::sleep(std::time::Duration::from_millis(500));
+
                 match winhttp::install() {
-                    Ok(()) => {
-                        tracing::info!("FlowReveal hook DLL: WinHTTP hooks installed");
-                    }
-                    Err(e) => {
-                        tracing::error!("FlowReveal hook DLL: Failed to install hooks: {}", e);
-                    }
+                    Ok(()) => {}
+                    Err(_) => {}
                 }
             });
         }
