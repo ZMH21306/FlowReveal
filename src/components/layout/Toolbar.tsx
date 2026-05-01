@@ -4,7 +4,7 @@ import { startCapture, stopCapture } from "../../lib/tauri-bindings";
 import type { CaptureConfig, CaptureMode } from "../../types";
 
 const CAPTURE_MODES: { value: CaptureMode; label: string; desc: string }[] = [
-  { value: "ForwardProxy", label: "Forward Proxy", desc: "Manual proxy configuration" },
+  { value: "ForwardProxy", label: "Forward Proxy", desc: "Auto proxy + MITM" },
   { value: "TransparentProxy", label: "Transparent", desc: "WFP transparent proxy (requires admin)" },
 ];
 
@@ -76,6 +76,7 @@ export function Toolbar() {
   const clearRequests = useStore((s) => s.clearRequests);
   const setCaptureStatus = useStore((s) => s.setCaptureStatus);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("ForwardProxy");
+  const [captureHttps, setCaptureHttps] = useState(true);
   const [pending, setPending] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -93,7 +94,7 @@ export function Toolbar() {
         const config: CaptureConfig = {
           mode: captureMode,
           capture_http: true,
-          capture_https: false,
+          capture_https: captureHttps,
           ports: [],
           process_filters: [],
           host_filters: [],
@@ -110,7 +111,7 @@ export function Toolbar() {
       console.error("Capture toggle failed:", e);
       setCaptureStatus("Error");
       setErrorMsg(String(e));
-      setTimeout(() => setErrorMsg(null), 5000);
+      setTimeout(() => setErrorMsg(null), 8000);
     } finally {
       setPending(false);
     }
@@ -138,6 +139,17 @@ export function Toolbar() {
         disabled={isRunning || pending}
       />
 
+      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={captureHttps}
+          onChange={(e) => setCaptureHttps(e.target.checked)}
+          disabled={isRunning || pending}
+          className="w-3.5 h-3.5 rounded border-[var(--color-border)] accent-[var(--color-accent)]"
+        />
+        <span className="text-xs text-[var(--color-text-secondary)]">HTTPS</span>
+      </label>
+
       <button
         onClick={clearRequests}
         className="px-3 py-1.5 rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors"
@@ -154,8 +166,9 @@ export function Toolbar() {
       <div className="flex-1" />
 
       {isRunning && (
-        <div className="text-xs text-[var(--color-accent)] font-mono">
-          {currentMode.label} · :40960
+        <div className="text-xs text-[var(--color-accent)] font-mono flex items-center gap-1">
+          <span>{currentMode.label} · :40960</span>
+          {captureHttps && <span title="HTTPS decryption enabled (auto proxy + auto cert)">🔒HTTPS</span>}
         </div>
       )}
 
