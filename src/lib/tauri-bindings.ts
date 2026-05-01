@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { CaptureConfig } from "../types";
+import type { CaptureConfig, CertificateAuthority } from "../types";
 
 export async function startCapture(config: CaptureConfig): Promise<void> {
   return invoke("start_capture", { config });
@@ -22,6 +22,14 @@ export async function installCert(): Promise<void> {
 
 export async function uninstallCert(): Promise<void> {
   return invoke("uninstall_cert");
+}
+
+export async function getCaCertPem(): Promise<string> {
+  return invoke("get_ca_cert_pem");
+}
+
+export async function getCaInfo(): Promise<CertificateAuthority> {
+  return invoke("get_ca_info");
 }
 
 export async function exportHar(sessionIds: number[]): Promise<string> {
