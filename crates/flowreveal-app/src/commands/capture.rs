@@ -4,7 +4,8 @@ use engine_core::capture_config::{CaptureConfig, CaptureMode};
 use engine_core::engine_stats::CaptureStatus;
 use engine_core::http_message::{HttpMessage, HttpSession};
 use engine_core::proxy::forward_proxy::ForwardProxy;
-use engine_core::proxy::ProxyShutdownHandle;
+use engine_core::mitm::CaManager;
+use engine_core::platform_integration::windows;
 use tokio::sync::mpsc;
 
 #[command]
@@ -29,14 +30,15 @@ pub async fn start_capture(
 
     let port = config.proxy_port;
     let mode = config.mode;
-    tracing::info!("Starting capture in {:?} mode on port {}", mode, port);
+    let capture_https = config.capture_https;
+    tracing::info!("Starting capture in {:?} mode on port {} (HTTPS={})", mode, port, capture_https);
 
     *state.capture_status.write().await = CaptureStatus::Running;
 
-    let shutdown_tx = match mode {
+    let (shutdown_tx, ca_manager_from_proxy) = match mode {
         CaptureMode::ForwardProxy => {
             match ForwardProxy::start(port, &config, tx).await {
-                Ok(handle) => handle.shutdown_tx,
+                Ok(handle) => (handle.shutdown_tx, handle.ca_manager),
                 Err(e) => {
                     *state.capture_status.write().await = CaptureStatus::Idle;
                     tracing::error!("Failed to start forward proxy: {}", e);
@@ -49,7 +51,7 @@ pub async fn start_capture(
             {
                 use engine_core::proxy::transparent_proxy::TransparentProxy;
                 match TransparentProxy::start(port, &config, tx).await {
-                    Ok(handle) => handle.shutdown_tx,
+                    Ok(handle) => (handle.shutdown_tx, None),
                     Err(e) => {
                         *state.capture_status.write().await = CaptureStatus::Idle;
                         tracing::error!("Failed to start transparent proxy: {}", e);
@@ -75,7 +77,59 @@ pub async fn start_capture(
 
     {
         let mut shutdown = state.shutdown_handle.lock().await;
-        *shutdown = Some(ProxyShutdownHandle { shutdown_tx });
+        *shutdown = Some(shutdown_tx);
+    }
+
+    if let Some(ca) = ca_manager_from_proxy {
+        let mut ca_guard = state.ca_manager.write().await;
+        let pem = ca.ca_cert_pem().to_string();
+        let key = ca.ca_key_pem().to_string();
+        match CaManager::from_pem(&pem, &key) {
+            Ok(manager) => {
+                *ca_guard = Some(manager);
+                tracing::info!("CA manager shared with AppState");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to clone CA manager into AppState: {}", e);
+            }
+        }
+    }
+
+    if mode == CaptureMode::ForwardProxy {
+        let proxy_addr = format!("127.0.0.1:{}", port);
+        match windows::set_system_proxy(&proxy_addr) {
+            Ok(original) => {
+                *state.proxy_was_set.write().await = true;
+                *state.original_proxy_settings.lock().await = Some(original);
+                tracing::info!("System proxy auto-configured to {}", proxy_addr);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to auto-set system proxy: {} - please configure manually", e);
+            }
+        }
+    }
+
+    if capture_https {
+        let ca_guard = state.ca_manager.read().await;
+        if let Some(ca) = ca_guard.as_ref() {
+            let cert_pem = ca.ca_cert_pem().to_string();
+            drop(ca_guard);
+
+            if !windows::is_ca_certificate_installed() {
+                match windows::install_ca_certificate(&cert_pem) {
+                    Ok(()) => {
+                        *state.cert_was_installed.write().await = true;
+                        tracing::info!("CA certificate auto-installed to Trusted Root store");
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to auto-install CA certificate: {} - HTTPS decryption may not work in browsers", e);
+                    }
+                }
+            } else {
+                tracing::info!("CA certificate already installed in Trusted Root store");
+                *state.cert_was_installed.write().await = true;
+            }
+        }
     }
 
     let sessions = state.sessions.clone();
@@ -126,7 +180,7 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
     {
         let mut shutdown = state.shutdown_handle.lock().await;
         if let Some(handle) = shutdown.take() {
-            let _ = handle.shutdown_tx.send(());
+            let _ = handle.send(());
             tracing::info!("Proxy shutdown signal sent");
         }
     }
@@ -142,6 +196,32 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
                 }
             }
         }
+    }
+
+    if *state.cert_was_installed.read().await {
+        match windows::uninstall_ca_certificate() {
+            Ok(()) => tracing::info!("CA certificate auto-removed from Trusted Root store"),
+            Err(e) => tracing::warn!("Failed to auto-remove CA certificate: {}", e),
+        }
+        *state.cert_was_installed.write().await = false;
+    }
+
+    if *state.proxy_was_set.read().await {
+        let original = state.original_proxy_settings.lock().await;
+        if let Some(ref orig) = *original {
+            match windows::restore_system_proxy(orig) {
+                Ok(()) => tracing::info!("System proxy auto-restored"),
+                Err(e) => tracing::warn!("Failed to auto-restore system proxy: {}", e),
+            }
+        } else {
+            match windows::clear_system_proxy() {
+                Ok(()) => tracing::info!("System proxy auto-cleared"),
+                Err(e) => tracing::warn!("Failed to auto-clear system proxy: {}", e),
+            }
+        }
+        *state.proxy_was_set.write().await = false;
+        drop(original);
+        *state.original_proxy_settings.lock().await = None;
     }
 
     {
