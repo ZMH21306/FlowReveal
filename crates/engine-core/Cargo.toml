@@ -11,7 +11,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
 bytes = "1"
-lru = "0.15"
+lru = "0.16"
 regex = "1"
 chrono = "0.4"
 dirs = "6"
