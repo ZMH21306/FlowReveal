@@ -6,6 +6,7 @@ use engine_core::http_message::{HttpMessage, HttpSession};
 use engine_core::proxy::forward_proxy::ForwardProxy;
 use engine_core::mitm::CaManager;
 use engine_core::platform_integration::windows;
+use engine_core::platform_integration::api_hook::ApiHookEngine;
 use tokio::sync::mpsc;
 
 #[command]
@@ -66,12 +67,27 @@ pub async fn start_capture(
             }
         }
         CaptureMode::ApiHook => {
-            *state.capture_status.write().await = CaptureStatus::Idle;
-            return Err("API Hook mode is not yet implemented".to_string());
+            #[cfg(target_os = "windows")]
+            {
+                let hook_engine = ApiHookEngine::new(tx);
+                match hook_engine.start().await {
+                    Ok(handle) => (handle.shutdown_tx, None),
+                    Err(e) => {
+                        *state.capture_status.write().await = CaptureStatus::Idle;
+                        tracing::error!("Failed to start API hook engine: {}", e);
+                        return Err(format!("Failed to start API hook engine: {}", e));
+                    }
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                *state.capture_status.write().await = CaptureStatus::Idle;
+                return Err("API Hook mode is only supported on Windows".to_string());
+            }
         }
     };
 
-    tracing::info!("Proxy started successfully in {:?} mode on port {}", mode, port);
+    tracing::info!("Capture started successfully in {:?} mode", mode);
 
     *state.config.write().await = Some(config);
 
@@ -109,7 +125,7 @@ pub async fn start_capture(
         }
     }
 
-    if capture_https {
+    if capture_https && mode != CaptureMode::ApiHook {
         let ca_guard = state.ca_manager.read().await;
         if let Some(ca) = ca_guard.as_ref() {
             let cert_pem = ca.ca_cert_pem().to_string();
@@ -181,7 +197,7 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
         let mut shutdown = state.shutdown_handle.lock().await;
         if let Some(handle) = shutdown.take() {
             let _ = handle.send(());
-            tracing::info!("Proxy shutdown signal sent");
+            tracing::info!("Capture shutdown signal sent");
         }
     }
 
@@ -195,6 +211,14 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
                     tracing::warn!("Failed to uninstall WFP filters: {}", e);
                 }
             }
+        }
+    }
+
+    {
+        let mut pids = state.hook_injected_pids.lock().await;
+        if !pids.is_empty() {
+            tracing::info!("Cleaning up {} injected processes", pids.len());
+            pids.clear();
         }
     }
 
