@@ -1,0 +1,537 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use hyper::Request;
+use hyper_util::rt::TokioIo;
+use http_body_util::{BodyExt, Full};
+use bytes::Bytes;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+
+use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme, TlsInfo};
+use crate::mitm::{CaManager, MitmConfig, build_tls_client_config, build_tls_server_config, pem_to_der, private_key_pem_to_der};
+
+static MITM_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn extract_header(headers: &[(String, String)], name: &str) -> Option<String> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.clone())
+}
+
+fn now_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64
+}
+
+fn parse_host_port(target: &str, default_port: u16) -> (String, u16) {
+    if let Some(bracket_end) = target.find(']') {
+        let host = target[..=bracket_end].to_string();
+        let port = target[bracket_end + 1..]
+            .strip_prefix(':')
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(default_port);
+        (host, port)
+    } else if let Some(colon_pos) = target.rfind(':') {
+        let host = target[..colon_pos].to_string();
+        let port = target[colon_pos + 1..].parse().unwrap_or(default_port);
+        (host, port)
+    } else {
+        (target.to_string(), default_port)
+    }
+}
+
+async fn read_line<T: AsyncReadExt + Unpin>(stream: &mut T) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        let n = stream.read(&mut byte).await?;
+        if n == 0 {
+            break;
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        line.push(byte[0]);
+    }
+    String::from_utf8(line).map_err(|e| e.into())
+}
+
+async fn read_headers<T: AsyncReadExt + Unpin>(stream: &mut T) -> Result<Vec<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut headers = Vec::new();
+    loop {
+        let line = read_line(stream).await?;
+        let line = line.trim_end().to_string();
+        if line.is_empty() {
+            break;
+        }
+        if let Some(colon_pos) = line.find(':') {
+            let name = line[..colon_pos].trim().to_string();
+            let value = line[colon_pos + 1..].trim().to_string();
+            headers.push((name, value));
+        }
+    }
+    Ok(headers)
+}
+
+pub async fn handle_mitm_connect(
+    client_stream: TcpStream,
+    request_target: &str,
+    req_headers: &[(String, String)],
+    source_ip: &str,
+    engine_tx: mpsc::Sender<HttpMessage>,
+    ca_manager: Arc<CaManager>,
+    mitm_config: &MitmConfig,
+    max_body_size: usize,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (host, port) = parse_host_port(request_target, 443);
+
+    if mitm_config.should_bypass(&host) {
+        tracing::info!("MITM: Bypassing host {} (in bypass list), falling back to tunnel", host);
+        return handle_connect_fallback(
+            client_stream,
+            &host,
+            port,
+            request_target,
+            req_headers,
+            source_ip,
+            engine_tx,
+        ).await;
+    }
+
+    tracing::info!("MITM: Intercepting CONNECT to {}:{}", host, port);
+    let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let timestamp = now_us();
+
+    let req_msg = HttpMessage {
+        id: session_id,
+        session_id,
+        direction: MessageDirection::Request,
+        protocol: HttpProtocol::HTTP1_1,
+        scheme: Scheme::Https,
+        method: Some("CONNECT".to_string()),
+        url: Some(format!("https://{}", request_target)),
+        status_code: None,
+        status_text: None,
+        headers: req_headers.to_vec(),
+        body: None,
+        body_size: 0,
+        body_truncated: false,
+        content_type: None,
+        process_name: None,
+        process_id: None,
+        process_path: None,
+        source_ip: Some(source_ip.to_string()),
+        dest_ip: Some(host.clone()),
+        source_port: None,
+        dest_port: Some(port),
+        timestamp,
+        duration_us: None,
+        cookies: vec![],
+        raw_tls_info: None,
+    };
+
+    let _ = engine_tx.send(req_msg).await;
+
+    let mut client = client_stream;
+    let _ = client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
+
+    let host_cert = match ca_manager.get_or_generate_cert(&host).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to generate cert for {}: {}", host, e);
+            return Ok(());
+        }
+    };
+
+    let cert_der = pem_to_der(&host_cert.cert_pem)?;
+    let key_der = private_key_pem_to_der(&host_cert.key_pem)?;
+
+    let server_config = match build_tls_server_config(cert_der, key_der) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to build TLS server config for {}: {}", host, e);
+            return Ok(());
+        }
+    };
+
+    let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+    let mut tls_client = match tls_acceptor.accept(client).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!("TLS handshake with client failed for {}: {}", host, e);
+            return Ok(());
+        }
+    };
+
+    tracing::debug!("MITM: TLS handshake with client completed for {}", host);
+
+    let first_line = match read_line(&mut tls_client).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::debug!("MITM: Failed to read first line from {}: {}", host, e);
+            return Ok(());
+        }
+    };
+
+    let first_line = first_line.trim_end().to_string();
+    let parts: Vec<&str> = first_line.splitn(3, ' ').collect();
+    if parts.len() < 2 {
+        tracing::debug!("MITM: Invalid request line from {}: {}", host, first_line);
+        return Ok(());
+    }
+
+    let method = parts[0];
+    let request_target = parts[1];
+
+    let raw_headers = match read_headers(&mut tls_client).await {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::debug!("MITM: Failed to read headers from {}: {}", host, e);
+            return Ok(());
+        }
+    };
+
+    let req_host = extract_header(&raw_headers, "host").unwrap_or_else(|| host.clone());
+    let forward_url = if request_target.starts_with("http://") || request_target.starts_with("https://") {
+        request_target.to_string()
+    } else {
+        format!("https://{}{}", req_host, request_target)
+    };
+
+    let content_length: usize = extract_header(&raw_headers, "content-length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    let mut req_body_bytes = Vec::new();
+    if content_length > 0 {
+        let to_read = content_length.min(max_body_size + 1);
+        req_body_bytes.resize(to_read, 0u8);
+        tls_client.read_exact(&mut req_body_bytes).await.ok();
+        if content_length > max_body_size + 1 {
+            let mut discard = vec![0u8; 4096];
+            let mut remaining = content_length - to_read;
+            while remaining > 0 {
+                let chunk = remaining.min(4096);
+                let n = tls_client.read(&mut discard[..chunk]).await.unwrap_or(0);
+                if n == 0 { break; }
+                remaining -= n;
+            }
+        }
+    }
+
+    let req_content_type = extract_header(&raw_headers, "content-type");
+    let req_body_size = req_body_bytes.len();
+    let (req_body_captured, req_body_truncated) = if req_body_size > max_body_size {
+        (Some(req_body_bytes[..max_body_size].to_vec()), true)
+    } else if req_body_size > 0 {
+        (Some(req_body_bytes.clone()), false)
+    } else {
+        (None, false)
+    };
+
+    let tls_info = TlsInfo {
+        version: "TLS 1.3".to_string(),
+        cipher_suite: "AES_256_GCM_SHA384".to_string(),
+        server_name: Some(host.clone()),
+        cert_chain: vec![],
+    };
+
+    let https_req_msg = HttpMessage {
+        id: session_id + 100,
+        session_id,
+        direction: MessageDirection::Request,
+        protocol: HttpProtocol::HTTP1_1,
+        scheme: Scheme::Https,
+        method: Some(method.to_string()),
+        url: Some(forward_url.clone()),
+        status_code: None,
+        status_text: None,
+        headers: raw_headers.clone(),
+        body: req_body_captured,
+        body_size: content_length,
+        body_truncated: req_body_truncated,
+        content_type: req_content_type,
+        process_name: None,
+        process_id: None,
+        process_path: None,
+        source_ip: Some(source_ip.to_string()),
+        dest_ip: Some(req_host.clone()),
+        source_port: None,
+        dest_port: Some(port),
+        timestamp: now_us(),
+        duration_us: None,
+        cookies: vec![],
+        raw_tls_info: Some(tls_info),
+    };
+
+    let _ = engine_tx.send(https_req_msg).await;
+
+    let start = std::time::Instant::now();
+
+    let forward_uri: hyper::Uri = forward_url.parse().unwrap_or_else(|_| {
+        format!("https://{}", request_target).parse().unwrap()
+    });
+
+    let forward_host = forward_uri.host().unwrap_or(&host).to_string();
+    let forward_port = forward_uri.port_u16().unwrap_or(443);
+
+    let remote_tcp = match TcpStream::connect((forward_host.as_str(), forward_port)).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("MITM upstream connect failed for {}: {}", host, e);
+            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            return Ok(());
+        }
+    };
+
+    let client_config2 = build_tls_client_config()?;
+    let connector2 = tokio_rustls::TlsConnector::from(Arc::new(client_config2));
+    let server_name2 = rustls::pki_types::ServerName::try_from(forward_host.clone())?;
+    let tls_remote2 = match connector2.connect(server_name2, remote_tcp).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("MITM upstream TLS handshake failed for {}: {}", host, e);
+            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            return Ok(());
+        }
+    };
+
+    let io = TokioIo::new(tls_remote2);
+
+    let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("MITM upstream handshake failed for {}: {}", host, e);
+            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            return Ok(());
+        }
+    };
+
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            tracing::debug!("MITM upstream connection error: {}", e);
+        }
+    });
+
+    let mut forward_req_builder = Request::builder()
+        .method(method)
+        .uri(forward_uri);
+
+    for (key, value) in &raw_headers {
+        let kl = key.to_lowercase();
+        if kl != "host" && kl != "connection" && kl != "proxy-connection" && kl != "proxy-authorization" && kl != "accept-encoding" {
+            forward_req_builder = forward_req_builder.header(key.as_str(), value.as_str());
+        }
+    }
+    forward_req_builder = forward_req_builder.header("Host", &forward_host);
+    forward_req_builder = forward_req_builder.header("Connection", "close");
+    forward_req_builder = forward_req_builder.header("Accept-Encoding", "identity");
+
+    let forward_req = forward_req_builder.body(Full::new(Bytes::from(req_body_bytes))).unwrap();
+
+    let upstream_resp = match sender.send_request(forward_req).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("MITM forward request failed for {}: {}", host, e);
+            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            return Ok(());
+        }
+    };
+
+    let duration_us = start.elapsed().as_micros() as u64;
+    let status_code = upstream_resp.status().as_u16();
+    let status_reason = upstream_resp.status().canonical_reason().map(|s| s.to_string());
+    let resp_headers: Vec<(String, String)> = upstream_resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
+    let resp_content_type = extract_header(&resp_headers, "content-type");
+    let resp_body_bytes = upstream_resp.into_body()
+        .collect()
+        .await
+        .map(|b| b.to_bytes().to_vec())
+        .unwrap_or_default();
+    let resp_body_size = resp_body_bytes.len();
+    let (resp_body_captured, resp_body_truncated) = if resp_body_size > max_body_size {
+        (Some(resp_body_bytes[..max_body_size].to_vec()), true)
+    } else if resp_body_size > 0 {
+        (Some(resp_body_bytes.clone()), false)
+    } else {
+        (None, false)
+    };
+
+    let resp_msg = HttpMessage {
+        id: session_id + 101,
+        session_id,
+        direction: MessageDirection::Response,
+        protocol: HttpProtocol::HTTP1_1,
+        scheme: Scheme::Https,
+        method: None,
+        url: None,
+        status_code: Some(status_code),
+        status_text: status_reason.clone(),
+        headers: resp_headers.clone(),
+        body: resp_body_captured,
+        body_size: resp_body_size,
+        body_truncated: resp_body_truncated,
+        content_type: resp_content_type,
+        process_name: None,
+        process_id: None,
+        process_path: None,
+        source_ip: Some(forward_host.clone()),
+        dest_ip: Some(source_ip.to_string()),
+        source_port: Some(port),
+        dest_port: None,
+        timestamp: now_us(),
+        duration_us: Some(duration_us),
+        cookies: vec![],
+        raw_tls_info: Some(TlsInfo {
+            version: "TLS 1.3".to_string(),
+            cipher_suite: "AES_256_GCM_SHA384".to_string(),
+            server_name: Some(host.clone()),
+            cert_chain: vec![],
+        }),
+    };
+
+    let _ = engine_tx.send(resp_msg).await;
+
+    let mut response_line = format!("HTTP/1.1 {} {}\r\n", status_code, status_reason.unwrap_or_else(|| "Unknown".to_string()));
+    for (key, value) in &resp_headers {
+        let kl = key.to_lowercase();
+        if kl != "connection" && kl != "transfer-encoding" && kl != "content-length" {
+            response_line.push_str(&format!("{}: {}\r\n", key, value));
+        }
+    }
+    response_line.push_str(&format!("Content-Length: {}\r\n", resp_body_size));
+    response_line.push_str("Connection: close\r\n");
+    response_line.push_str("\r\n");
+
+    tls_client.write_all(response_line.as_bytes()).await?;
+    if !resp_body_bytes.is_empty() {
+        tls_client.write_all(&resp_body_bytes).await?;
+    }
+    tls_client.flush().await.ok();
+    tokio::time::timeout(std::time::Duration::from_secs(2), tls_client.shutdown()).await.ok();
+
+    tracing::info!("MITM: Completed HTTPS interception for {} (status={})", host, status_code);
+    Ok(())
+}
+
+async fn handle_connect_fallback(
+    mut client_stream: TcpStream,
+    host: &str,
+    port: u16,
+    request_target: &str,
+    req_headers: &[(String, String)],
+    source_ip: &str,
+    engine_tx: mpsc::Sender<HttpMessage>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let timestamp = now_us();
+
+    let req_msg = HttpMessage {
+        id: session_id,
+        session_id,
+        direction: MessageDirection::Request,
+        protocol: HttpProtocol::HTTP1_1,
+        scheme: Scheme::Https,
+        method: Some("CONNECT".to_string()),
+        url: Some(format!("https://{}", request_target)),
+        status_code: None,
+        status_text: None,
+        headers: req_headers.to_vec(),
+        body: None,
+        body_size: 0,
+        body_truncated: false,
+        content_type: None,
+        process_name: None,
+        process_id: None,
+        process_path: None,
+        source_ip: Some(source_ip.to_string()),
+        dest_ip: Some(host.to_string()),
+        source_port: None,
+        dest_port: Some(port),
+        timestamp,
+        duration_us: None,
+        cookies: vec![],
+        raw_tls_info: None,
+    };
+
+    let _ = engine_tx.send(req_msg).await;
+
+    let remote_stream = match TcpStream::connect((host, port)).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("CONNECT fallback: Failed to connect to {}:{} - {}", host, port, e);
+            let _ = client_stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
+            return Ok(());
+        }
+    };
+
+    let start = std::time::Instant::now();
+    let duration_us = start.elapsed().as_micros() as u64;
+
+    let resp_msg = HttpMessage {
+        id: session_id + 1,
+        session_id,
+        direction: MessageDirection::Response,
+        protocol: HttpProtocol::HTTP1_1,
+        scheme: Scheme::Https,
+        method: None,
+        url: None,
+        status_code: Some(200),
+        status_text: Some("Connection Established (tunnel)".to_string()),
+        headers: vec![],
+        body: None,
+        body_size: 0,
+        body_truncated: false,
+        content_type: None,
+        process_name: None,
+        process_id: None,
+        process_path: None,
+        source_ip: Some(host.to_string()),
+        dest_ip: Some(source_ip.to_string()),
+        source_port: Some(port),
+        dest_port: None,
+        timestamp: now_us(),
+        duration_us: Some(duration_us),
+        cookies: vec![],
+        raw_tls_info: None,
+    };
+
+    let _ = engine_tx.send(resp_msg).await;
+
+    let _ = client_stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
+
+    let (mut cr, mut cw) = tokio::io::split(client_stream);
+    let (mut rr, mut rw) = tokio::io::split(remote_stream);
+
+    let client_to_remote = tokio::io::copy(&mut cr, &mut rw);
+    let remote_to_client = tokio::io::copy(&mut rr, &mut cw);
+
+    tokio::select! {
+        r = client_to_remote => {
+            if let Err(e) = r {
+                tracing::debug!("CONNECT fallback tunnel client->remote error: {}", e);
+            }
+        }
+        r = remote_to_client => {
+            if let Err(e) = r {
+                tracing::debug!("CONNECT fallback tunnel remote->client error: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}
