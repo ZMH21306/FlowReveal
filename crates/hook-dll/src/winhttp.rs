@@ -146,7 +146,6 @@ pub fn install() -> Result<(), String> {
         minhook_sys::MH_EnableHook(std::ptr::null_mut());
     }
 
-    tracing::info!("WinHTTP hooks installed successfully");
     Ok(())
 }
 
@@ -155,7 +154,6 @@ pub fn uninstall() {
         minhook_sys::MH_DisableHook(std::ptr::null_mut());
         minhook_sys::MH_Uninitialize();
     }
-    tracing::info!("WinHTTP hooks uninstalled");
 }
 
 unsafe fn hooked_open_request(
