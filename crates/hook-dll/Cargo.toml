@@ -9,7 +9,6 @@ crate-type = ["cdylib"]
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing = "0.1"
 minhook-sys = "0.1"
 once_cell = "1"
 
