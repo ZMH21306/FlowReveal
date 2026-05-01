@@ -1395,6 +1395,8 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 name = "hook-dll"
 version = "0.1.0"
 dependencies = [
+ "minhook-sys",
+ "once_cell",
  "serde",
  "serde_json",
  "tracing",
@@ -1975,6 +1977,15 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "minhook-sys"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd5e3d769f50ac2ec0cbd86ec241d9aa219a080a74c0287ce781f46a8900fa18"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "minimal-lexical"
