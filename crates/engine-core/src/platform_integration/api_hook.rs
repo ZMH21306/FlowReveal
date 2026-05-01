@@ -56,7 +56,7 @@ impl ApiHookEngine {
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let dll_path = exe_dir.join("hook_dll.dll");
+        let dll_path = exe_dir.join("hook_dll_v2.dll");
 
         Self {
             event_tx,
@@ -190,7 +190,7 @@ async fn pipe_accept_loop(tx: mpsc::Sender<HookEvent>, running: Arc<AtomicBool>)
         let server = if is_first {
             let result = ServerOptions::new()
                 .first_pipe_instance(true)
-                .max_instances(255)
+                .max_instances(4)
                 .create(PIPE_NAME);
             match result {
                 Ok(s) => {
@@ -200,7 +200,7 @@ async fn pipe_accept_loop(tx: mpsc::Sender<HookEvent>, running: Arc<AtomicBool>)
                 Err(_) => {
                     let result = ServerOptions::new()
                         .first_pipe_instance(false)
-                        .max_instances(255)
+                        .max_instances(4)
                         .create(PIPE_NAME);
                     match result {
                         Ok(s) => {
@@ -220,7 +220,7 @@ async fn pipe_accept_loop(tx: mpsc::Sender<HookEvent>, running: Arc<AtomicBool>)
         } else {
             match ServerOptions::new()
                 .first_pipe_instance(false)
-                .max_instances(255)
+                .max_instances(4)
                 .create(PIPE_NAME)
             {
                 Ok(s) => s,
