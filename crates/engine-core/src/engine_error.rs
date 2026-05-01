@@ -18,7 +18,7 @@ pub enum EngineError {
     HookError(String),
 
     #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
 
     #[error("Engine not running")]
     NotRunning,
