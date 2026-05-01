@@ -52,45 +52,63 @@ fn start_pipe_thread() {
     });
 }
 
+fn write_event_to_pipe(event: &HookEvent) -> bool {
+    let json = match serde_json::to_string(event) {
+        Ok(j) => j,
+        Err(_) => return false,
+    };
+
+    let bytes = json.as_bytes();
+    let len = bytes.len() as u32;
+    let mut written: u32 = 0;
+
+    let ptr = PIPE_HANDLE.load(Ordering::Relaxed);
+    if ptr.is_null() {
+        return false;
+    }
+    let handle = HANDLE(ptr);
+
+    let len_result = unsafe {
+        WriteFile(handle, Some(&len.to_le_bytes()), Some(&mut written), None)
+    };
+    if len_result.is_err() {
+        return false;
+    }
+
+    let data_result = unsafe {
+        WriteFile(handle, Some(bytes), Some(&mut written), None)
+    };
+    if data_result.is_err() {
+        return false;
+    }
+
+    true
+}
+
 fn pipe_writer_loop(rx: mpsc::Receiver<HookEvent>) {
     loop {
-        match rx.recv() {
-            Ok(event) => {
-                if !ensure_pipe_connected() {
-                    continue;
-                }
-
-                let json = match serde_json::to_string(&event) {
-                    Ok(j) => j,
-                    Err(_) => continue,
-                };
-
-                let bytes = json.as_bytes();
-                let len = bytes.len() as u32;
-                let mut written: u32 = 0;
-
-                let ptr = PIPE_HANDLE.load(Ordering::Relaxed);
-                let handle = HANDLE(ptr);
-
-                let len_result = unsafe {
-                    WriteFile(handle, Some(&len.to_le_bytes()), Some(&mut written), None)
-                };
-                if len_result.is_err() {
-                    disconnect_pipe();
-                    continue;
-                }
-
-                let data_result = unsafe {
-                    WriteFile(handle, Some(bytes), Some(&mut written), None)
-                };
-                if data_result.is_err() {
-                    disconnect_pipe();
-                    continue;
-                }
-
-                while let Ok(..) = rx.try_recv() {}
-            }
+        let event = match rx.recv() {
+            Ok(e) => e,
             Err(_) => break,
+        };
+
+        if !ensure_pipe_connected() {
+            continue;
+        }
+
+        if !write_event_to_pipe(&event) {
+            disconnect_pipe();
+            continue;
+        }
+
+        while let Ok(event) = rx.try_recv() {
+            if !ensure_pipe_connected() {
+                break;
+            }
+            if !write_event_to_pipe(&event) {
+                disconnect_pipe();
+                break;
+            }
         }
     }
 
