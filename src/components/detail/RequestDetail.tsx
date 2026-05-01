@@ -77,6 +77,22 @@ function BodyView({ body, bodySize, bodyTruncated, contentType }: {
   );
 }
 
+function TlsInfoBadge({ tlsInfo }: { tlsInfo: { version: string; cipher_suite: string; server_name: string | null } }) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-[var(--color-accent)] bg-[var(--color-bg-tertiary)] px-2 py-1 rounded">
+      <span>🔓 {tlsInfo.version}</span>
+      <span className="text-[var(--color-text-secondary)]">|</span>
+      <span>{tlsInfo.cipher_suite}</span>
+      {tlsInfo.server_name && (
+        <>
+          <span className="text-[var(--color-text-secondary)]">|</span>
+          <span>SNI: {tlsInfo.server_name}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function RequestDetail() {
   const sessions = useStore((s) => s.sessions);
   const selectedId = useStore((s) => s.selectedId);
@@ -121,6 +137,11 @@ export function RequestDetail() {
             <span>Process: {req.process_name} ({req.process_id})</span>
           )}
         </div>
+        {req.raw_tls_info && (
+          <div className="mt-2">
+            <TlsInfoBadge tlsInfo={req.raw_tls_info} />
+          </div>
+        )}
       </div>
 
       <div className="px-4 py-3 border-b border-[var(--color-border)]">
