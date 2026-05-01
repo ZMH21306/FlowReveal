@@ -133,6 +133,13 @@ export interface ProcessInfo {
   icon_data: number[] | null;
 }
 
+export interface ProcessEntry {
+  pid: number;
+  name: string;
+  path: string | null;
+  is_injected: boolean;
+}
+
 export interface ConnectionInfo {
   local_addr: string;
   local_port: number;
