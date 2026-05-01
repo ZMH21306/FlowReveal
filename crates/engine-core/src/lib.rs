@@ -5,6 +5,7 @@ pub mod engine_stats;
 pub mod intercept_engine;
 pub mod mitm;
 pub mod platform;
+pub mod platform_integration;
 pub mod process_info;
 pub mod proxy;
 pub mod storage;
