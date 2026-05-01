@@ -44,6 +44,8 @@ export function TrafficList() {
             const bodySize = (req.body_size || 0) + (resp?.body_size || 0);
             const duration = resp?.duration_us;
             const process = req.process_name || "-";
+            const isHttps = req.scheme === "Https";
+            const isDecrypted = req.raw_tls_info != null;
 
             return (
               <div
@@ -56,7 +58,7 @@ export function TrafficList() {
                 }`}
               >
                 <span className="text-[var(--color-text-secondary)] font-mono">
-                  {sid}
+                  {isDecrypted ? "🔓" : isHttps ? "🔒" : ""}{sid}
                 </span>
                 <span
                   style={{ color: methodColor(method) }}
