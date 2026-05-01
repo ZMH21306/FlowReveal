@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use hyper::Request;
 use hyper_util::rt::TokioIo;
@@ -12,20 +13,19 @@ use tokio::sync::{mpsc, oneshot};
 use crate::capture_config::CaptureConfig;
 use crate::engine_error::EngineError;
 use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme};
+use crate::mitm::{CaManager, MitmConfig};
+use crate::proxy::mitm_proxy;
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub struct ForwardProxyHandle {
     pub shutdown_tx: oneshot::Sender<()>,
+    pub ca_manager: Option<Arc<CaManager>>,
 }
 
 pub struct ForwardProxy;
 
 impl ForwardProxy {
-    pub fn new() -> Self {
-        Self
-    }
-
     pub async fn start(
         port: u16,
         config: &CaptureConfig,
@@ -34,10 +34,46 @@ impl ForwardProxy {
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let max_body_size = config.max_body_size;
+        let capture_https = config.capture_https;
+
+        let mitm_config = MitmConfig {
+            enabled: capture_https,
+            bypass_hosts: config.mitm_bypass_hosts.clone(),
+            bypass_port_ranges: vec![],
+            max_cert_cache_entries: 1024,
+            cert_validity_days: 365,
+        };
+
+        let ca_manager: Option<Arc<CaManager>> = if capture_https {
+            match if let (Some(cert_path), Some(key_path)) = (&config.ca_cert_path, &config.ca_key_path) {
+                let cert_pem = std::fs::read_to_string(cert_path).map_err(|e| EngineError::Io(e))?;
+                let key_pem = std::fs::read_to_string(key_path).map_err(|e| EngineError::Io(e))?;
+                CaManager::from_pem(&cert_pem, &key_pem)
+            } else {
+                let app_data_dir = dirs::data_local_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join("FlowReveal");
+                CaManager::load_or_create(&app_data_dir)
+            } {
+                Ok(m) => {
+                    tracing::info!("MITM CA manager initialized, HTTPS decryption enabled");
+                    Some(Arc::new(m))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to initialize CA manager: {} - HTTPS capture disabled", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let listener = TcpListener::bind(addr).await?;
 
         tracing::info!("Forward proxy listening on {}", addr);
+
+        let ca_manager_clone = ca_manager.clone();
+        let mitm_config_clone = mitm_config.clone();
 
         tokio::spawn(async move {
             let shutdown_rx = shutdown_rx;
@@ -54,8 +90,10 @@ impl ForwardProxy {
                 match accept_result {
                     Ok((stream, client_addr)) => {
                         let engine_tx = engine_tx.clone();
+                        let ca_manager = ca_manager_clone.clone();
+                        let mitm_config = mitm_config_clone.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = handle_raw_connection(stream, client_addr, engine_tx, max_body_size).await {
+                            if let Err(e) = handle_raw_connection(stream, client_addr, engine_tx, max_body_size, ca_manager, &mitm_config).await {
                                 tracing::debug!("Connection error from {}: {}", client_addr, e);
                             }
                         });
@@ -67,7 +105,7 @@ impl ForwardProxy {
             }
         });
 
-        Ok(ForwardProxyHandle { shutdown_tx })
+        Ok(ForwardProxyHandle { shutdown_tx, ca_manager })
     }
 }
 
@@ -90,6 +128,8 @@ async fn handle_raw_connection(
     client_addr: SocketAddr,
     engine_tx: mpsc::Sender<HttpMessage>,
     max_body_size: usize,
+    ca_manager: Option<Arc<CaManager>>,
+    mitm_config: &MitmConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = BufReader::new(stream);
     let mut first_line = String::new();
@@ -127,15 +167,29 @@ async fn handle_raw_connection(
     let session_id = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
 
     if method.eq_ignore_ascii_case("CONNECT") {
-        handle_connect_tunnel(
-            reader,
-            session_id,
-            request_target,
-            &raw_headers,
-            &source_ip,
-            timestamp,
-            engine_tx,
-        ).await
+        if let Some(ref ca) = ca_manager {
+            let client_stream = reader.into_inner();
+            mitm_proxy::handle_mitm_connect(
+                client_stream,
+                request_target,
+                &raw_headers,
+                &source_ip,
+                engine_tx,
+                ca.clone(),
+                mitm_config,
+                max_body_size,
+            ).await
+        } else {
+            handle_connect_tunnel(
+                reader,
+                session_id,
+                request_target,
+                &raw_headers,
+                &source_ip,
+                timestamp,
+                engine_tx,
+            ).await
+        }
     } else {
         handle_http_request(
             reader,
