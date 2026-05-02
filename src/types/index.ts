@@ -173,3 +173,67 @@ export interface HookPacket {
   sequence: number;
   timestamp: number;
 }
+
+export type RuleCategory = "AutoReply" | "HeaderModifier" | "Redirect";
+export type MatchField = "Method" | "Url" | "Host" | "Path" | "StatusCode" | "ContentType" | "HeaderName" | "HeaderValue" | "Body" | "ProcessName" | "Scheme" | "QueryParam";
+export type MatchOperator = "Equals" | "NotEquals" | "Contains" | "NotContains" | "StartsWith" | "EndsWith" | "MatchesRegex" | "GreaterThan" | "LessThan" | "InRange" | "Wildcard";
+export type MatchLogic = "And" | "Or";
+export type PresetRuleType = "CorsEnable" | "CacheDisable" | "CookiesRemove" | "ServiceUnavailable503" | "Redirect302" | "Ok200";
+export type RedirectType = "Permanent301" | "Temporary302" | "Temporary307" | "Permanent308";
+export type BodySource = { Inline: string } | { File: string } | "Empty";
+
+export interface MatchFilter {
+  field: MatchField;
+  operator: MatchOperator;
+  value: string;
+  case_sensitive: boolean;
+}
+
+export interface MatchCondition {
+  logic: MatchLogic;
+  filters: MatchFilter[];
+}
+
+export interface AutoReplyAction {
+  status_code: number;
+  status_text: string;
+  headers: [string, string][];
+  body_source: BodySource;
+  delay_ms: number;
+}
+
+export interface HeaderAction {
+  Add?: { name: string; value: string; only_if_missing: boolean };
+  Remove?: { name: string };
+  Replace?: { name: string; value: string };
+  ReplaceRegex?: { name: string; pattern: string; replacement: string };
+}
+
+export interface HeaderModifierAction {
+  request_actions: HeaderAction[];
+  response_actions: HeaderAction[];
+}
+
+export interface RedirectAction {
+  target_url: string;
+  redirect_type: RedirectType;
+  preserve_query: boolean;
+  preserve_path: boolean;
+}
+
+export type RuleAction =
+  | { AutoReply: AutoReplyAction }
+  | { HeaderModifier: HeaderModifierAction }
+  | { Redirect: RedirectAction };
+
+export interface Rule {
+  id: number;
+  name: string;
+  category: RuleCategory;
+  enabled: boolean;
+  priority: number;
+  match_condition: MatchCondition;
+  action: RuleAction;
+  created_at: number;
+  updated_at: number;
+}
