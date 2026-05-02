@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 
 use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme, TlsInfo};
 use crate::mitm::{CaManager, MitmConfig, build_tls_client_config, build_tls_server_config, pem_to_der, private_key_pem_to_der};
+use crate::protocol::websocket;
 use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header};
 use crate::rules::{RuleEngine, RuleExecutionResult, executor::RuleExecutor};
 
@@ -162,6 +163,8 @@ pub async fn handle_mitm_connect(
         .unwrap_or(0);
     let (req_body_captured, req_body_truncated) = truncate_body(&req_body_bytes, max_body_size);
 
+    let is_ws_upgrade = websocket::is_websocket_upgrade(&raw_headers);
+
     let tls_info = TlsInfo {
         version: "TLS 1.3".to_string(),
         cipher_suite: "AES_256_GCM_SHA384".to_string(),
@@ -169,11 +172,13 @@ pub async fn handle_mitm_connect(
         cert_chain: vec![],
     };
 
+    let protocol = if is_ws_upgrade { HttpProtocol::WebSocket } else { HttpProtocol::HTTP1_1 };
+
     let https_req_msg = HttpMessage {
         id: session_id + 100,
         session_id,
         direction: MessageDirection::Request,
-        protocol: HttpProtocol::HTTP1_1,
+        protocol,
         scheme: Scheme::Https,
         method: Some(method.clone()),
         url: Some(forward_url.clone()),
@@ -195,9 +200,23 @@ pub async fn handle_mitm_connect(
         duration_us: None,
         cookies: vec![],
         raw_tls_info: Some(tls_info),
+        stream_id: None,
     };
 
     let _ = engine_tx.send(https_req_msg).await;
+
+    if is_ws_upgrade {
+        tracing::info!("[MITM] WebSocket Upgrade 检测到: {}", forward_url);
+        let _ = tls_client.write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n").await;
+        let (ws_frame_tx, _) = mpsc::channel::<crate::http_message::WebSocketFrame>(1024);
+        let ws_result = websocket::handle_websocket_proxy(
+            tls_client, host, port, source_ip.to_string(), session_id, engine_tx, ws_frame_tx, max_body_size,
+        ).await;
+        if let Err(e) = ws_result {
+            tracing::warn!("[MITM] WebSocket 代理错误: {}", e);
+        }
+        return Ok(());
+    }
 
     // === MITM 规则检查点（请求阶段） ===
     if let Some(result) = rule_engine.apply(&HttpMessage {
@@ -226,6 +245,7 @@ pub async fn handle_mitm_connect(
         duration_us: None,
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     }, None).await {
         match result {
             RuleExecutionResult::AutoReply { status_code, status_text, headers, body, delay_ms } => {
@@ -275,6 +295,7 @@ pub async fn handle_mitm_connect(
                         server_name: Some(host.clone()),
                         cert_chain: vec![],
                     }),
+                    stream_id: None,
                 };
                 let _ = engine_tx.send(mock_resp_msg).await;
                 return Ok(());
@@ -325,6 +346,7 @@ pub async fn handle_mitm_connect(
                         server_name: Some(host.clone()),
                         cert_chain: vec![],
                     }),
+                    stream_id: None,
                 };
                 let _ = engine_tx.send(redirect_resp_msg).await;
                 return Ok(());
@@ -334,7 +356,6 @@ pub async fn handle_mitm_connect(
                     let mut modified_headers = raw_headers.clone();
                     RuleExecutor::apply_header_actions(&mut modified_headers, &request_actions);
                     tracing::info!("[MITM] 请求头修改规则触发 | 修改了 {} 个动作", request_actions.len());
-                    // 注意：此处简化处理，实际修改在后续转发时生效
                 }
                 if !response_actions.is_empty() {
                     tracing::info!("[MITM] 响应头修改规则将在响应阶段应用 | {} 个动作", response_actions.len());
@@ -463,6 +484,7 @@ pub async fn handle_mitm_connect(
             server_name: Some(host.clone()),
             cert_chain: vec![],
         }),
+        stream_id: None,
     };
 
     let _ = engine_tx.send(resp_msg).await;
@@ -524,6 +546,7 @@ fn build_connect_message(
         duration_us: None,
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     }
 }
 
@@ -580,6 +603,7 @@ async fn handle_connect_fallback(
         duration_us: Some(duration_us),
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     };
 
     let _ = engine_tx.send(resp_msg).await;
