@@ -143,6 +143,7 @@ mod tests {
             duration_us: None,
             cookies: vec![],
             raw_tls_info: None,
+            stream_id: None,
         };
         let mut session = HttpSession::new(req);
         if let Some(code) = status {
