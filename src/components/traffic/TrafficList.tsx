@@ -9,7 +9,7 @@ import type { HttpSession } from "../../types";
 
 export function TrafficList() {
   const sessions = useStore((s) => s.sessions);
-  const sessionList = useStore((s) => s.sessionList);
+  const filteredSessionList = useStore((s) => s.filteredSessionList);
   const selectedId = useStore((s) => s.selectedId);
   const selectRequest = useStore((s) => s.selectRequest);
 
@@ -28,12 +28,12 @@ export function TrafficList() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {sessionList.length === 0 ? (
+        {filteredSessionList.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--color-text-secondary)] text-sm">
             No traffic captured yet. Click "Start" to begin.
           </div>
         ) : (
-          sessionList.map((sid) => {
+          filteredSessionList.map((sid) => {
             const session = getSession(sid);
             if (!session) return null;
             const req = session.request;
