@@ -55,6 +55,7 @@ export interface HttpMessage {
   duration_us: number | null;
   cookies: Cookie[];
   raw_tls_info: TlsInfo | null;
+  stream_id: number | null;
 }
 
 export interface HttpSession {
