@@ -1,4 +1,4 @@
-import { useStore } from "../../store";
+import { useStore, type StoreState } from "../../store";
 import { formatSize } from "../../lib/utils";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -8,11 +8,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function StatusBar() {
-  const totalSessions = useStore((s) => s.totalSessions);
-  const activeSessions = useStore((s) => s.activeSessions);
-  const bytesCaptured = useStore((s) => s.bytesCaptured);
-  const decryptedCount = useStore((s) => s.decryptedCount);
-  const captureStatus = useStore((s) => s.captureStatus);
+  const totalSessions = useStore((s: StoreState) => s.totalSessions);
+  const activeSessions = useStore((s: StoreState) => s.activeSessions);
+  const bytesCaptured = useStore((s: StoreState) => s.bytesCaptured);
+  const decryptedCount = useStore((s: StoreState) => s.decryptedCount);
+  const captureStatus = useStore((s: StoreState) => s.captureStatus);
 
   return (
     <div className="flex items-center gap-6 px-4 py-1.5 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
