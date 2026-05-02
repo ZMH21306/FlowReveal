@@ -4,6 +4,7 @@
   --color-bg-primary: #0a0a0f;
   --color-bg-secondary: #12121a;
   --color-bg-tertiary: #1a1a26;
+  --color-bg-hover: #222233;
   --color-border: #2a2a3a;
   --color-text-primary: #e4e4ef;
   --color-text-secondary: #8888a0;
@@ -20,6 +21,29 @@
   --color-method-head: #6b7280;
   --color-method-options: #6b7280;
   --color-method-connect: #ec4899;
+}
+
+[data-theme="light"] {
+  --color-bg-primary: #f8f9fa;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #f0f1f3;
+  --color-bg-hover: #e5e7eb;
+  --color-border: #d1d5db;
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #6b7280;
+  --color-accent: #4f46e5;
+  --color-accent-hover: #6366f1;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-method-get: #16a34a;
+  --color-method-post: #d97706;
+  --color-method-put: #2563eb;
+  --color-method-delete: #dc2626;
+  --color-method-patch: #9333ea;
+  --color-method-head: #6b7280;
+  --color-method-options: #6b7280;
+  --color-method-connect: #db2777;
 }
 
 * {
