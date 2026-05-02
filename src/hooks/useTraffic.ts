@@ -1,18 +1,20 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { HttpMessage } from "../types";
 import { useStore } from "../store";
 
 export function useTraffic() {
   const processMessage = useStore((s) => s.processMessage);
+  const processMessageRef = useRef(processMessage);
+  processMessageRef.current = processMessage;
 
   useEffect(() => {
-    const unlistenRequest = listen<HttpMessage>("traffic:request", (event) => {
-      processMessage(event.payload);
+    const unlistenPromise = listen<HttpMessage>("traffic:request", (event) => {
+      processMessageRef.current(event.payload);
     });
 
     return () => {
-      unlistenRequest.then((fn) => fn());
+      unlistenPromise.then((fn) => fn());
     };
-  }, [processMessage]);
+  }, []);
 }
