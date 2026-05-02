@@ -124,6 +124,38 @@ impl HttpMessage {
     }
 }
 
+impl Default for HttpMessage {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            session_id: 0,
+            direction: MessageDirection::Request,
+            protocol: HttpProtocol::HTTP1_1,
+            scheme: Scheme::Https,
+            method: None,
+            url: None,
+            status_code: None,
+            status_text: None,
+            headers: vec![],
+            body: None,
+            body_size: 0,
+            body_truncated: false,
+            content_type: None,
+            process_name: None,
+            process_id: None,
+            process_path: None,
+            source_ip: None,
+            dest_ip: None,
+            source_port: None,
+            dest_port: None,
+            timestamp: 0,
+            duration_us: None,
+            cookies: vec![],
+            raw_tls_info: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpSession {
     pub id: u64,
