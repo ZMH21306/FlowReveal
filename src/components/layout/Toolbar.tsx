@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useStore, type StoreState } from "../../store";
 import { startCapture, stopCapture, exportHar } from "../../lib/tauri-bindings";
 import type { CaptureConfig, CaptureMode } from "../../types";
+import { getStoredTheme, setStoredTheme, type ThemeMode } from "../../hooks/useTheme";
 
 const CAPTURE_MODES: { value: CaptureMode; label: string; desc: string }[] = [
   { value: "DualProxy", label: "双代理模式", desc: "正向代理 + 透明代理，最大化流量捕获（推荐）" },
@@ -78,9 +79,13 @@ interface ToolbarProps {
   onToggleStats: () => void;
   showStats: boolean;
   onOpenTransformer: () => void;
+  onOpenAi: () => void;
+  onOpenDiff: () => void;
+  onOpenVuln: () => void;
+  onOpenPlugins: () => void;
 }
 
-export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, onOpenTransformer }: ToolbarProps) {
+export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, onOpenTransformer, onOpenAi, onOpenDiff, onOpenVuln, onOpenPlugins }: ToolbarProps) {
   const captureStatus = useStore((s: StoreState) => s.captureStatus);
   const clearRequests = useStore((s: StoreState) => s.clearRequests);
   const setCaptureStatus = useStore((s: StoreState) => s.setCaptureStatus);
@@ -89,6 +94,7 @@ export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, on
   const [captureHttps, setCaptureHttps] = useState(true);
   const [pending, setPending] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme());
 
   const isRunning = captureStatus === "Running";
 
@@ -244,6 +250,50 @@ export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, on
         title="数据转换器"
       >
         🔧 工具
+      </button>
+
+      <button
+        onClick={onOpenAi}
+        className="px-3 py-[6px] rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
+        title="AI 智能分析"
+      >
+        🤖 AI
+      </button>
+
+      <button
+        onClick={onOpenDiff}
+        className="px-3 py-[6px] rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
+        title="流量 Diff 对比"
+      >
+        🔄 Diff
+      </button>
+
+      <button
+        onClick={onOpenVuln}
+        className="px-3 py-[6px] rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
+        title="漏洞扫描"
+      >
+        🛡️ 扫描
+      </button>
+
+      <button
+        onClick={onOpenPlugins}
+        className="px-3 py-[6px] rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
+        title="插件管理"
+      >
+        🧩 插件
+      </button>
+
+      <button
+        onClick={() => {
+          const next: ThemeMode = themeMode === "dark" ? "light" : themeMode === "light" ? "system" : "dark";
+          setThemeMode(next);
+          setStoredTheme(next);
+        }}
+        className="px-2 py-[6px] rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
+        title={`主题: ${themeMode === "dark" ? "暗色" : themeMode === "light" ? "亮色" : "跟随系统"} (点击切换)`}
+      >
+        {themeMode === "dark" ? "🌙" : themeMode === "light" ? "☀️" : "💻"}
       </button>
 
       <div className="text-xs text-[var(--color-text-secondary)]">
