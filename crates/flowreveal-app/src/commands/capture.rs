@@ -158,6 +158,10 @@ pub async fn start_capture(
                         s.add_bytes(msg.body_size);
                     }
                 }
+
+                if sess.len() > 10000 {
+                    sess.drain(..1000);
+                }
             }
 
             let _ = app_handle.emit("traffic:request", &msg);
