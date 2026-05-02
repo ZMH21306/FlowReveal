@@ -13,12 +13,13 @@ pub struct CaptureConfig {
     pub ca_key_path: Option<String>,
     pub mitm_bypass_hosts: Vec<String>,
     pub proxy_port: u16,
+    pub transparent_proxy_port: u16,
 }
 
 impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
-            mode: CaptureMode::ForwardProxy,
+            mode: CaptureMode::DualProxy,
             capture_http: true,
             capture_https: false,
             ports: vec![],
@@ -29,6 +30,7 @@ impl Default for CaptureConfig {
             ca_key_path: None,
             mitm_bypass_hosts: vec![],
             proxy_port: 40960,
+            transparent_proxy_port: 40961,
         }
     }
 }
@@ -37,6 +39,7 @@ impl Default for CaptureConfig {
 pub enum CaptureMode {
     ForwardProxy,
     TransparentProxy,
+    DualProxy,
     ApiHook,
 }
 
@@ -45,6 +48,7 @@ impl std::fmt::Display for CaptureMode {
         match self {
             CaptureMode::ForwardProxy => write!(f, "Forward Proxy"),
             CaptureMode::TransparentProxy => write!(f, "Transparent Proxy"),
+            CaptureMode::DualProxy => write!(f, "Dual Proxy"),
             CaptureMode::ApiHook => write!(f, "API Hook"),
         }
     }
