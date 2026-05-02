@@ -37,6 +37,9 @@ impl ForwardProxy {
         let max_body_size = config.max_body_size;
         let capture_https = config.capture_https;
 
+        tracing::info!("[ForwardProxy] 初始化中 | 端口={} | HTTPS解密={} | 最大Body={}",
+            port, capture_https, max_body_size);
+
         let mitm_config = MitmConfig {
             enabled: capture_https,
             bypass_hosts: config.mitm_bypass_hosts.clone(),
@@ -48,37 +51,46 @@ impl ForwardProxy {
         let ca_manager = if capture_https {
             match load_ca_manager(config) {
                 Ok(m) => {
-                    tracing::info!("MITM CA manager initialized, HTTPS decryption enabled");
+                    tracing::info!("[ForwardProxy] ✓ MITM CA 管理器初始化成功，HTTPS 解密已启用");
                     Some(Arc::new(m))
                 }
                 Err(e) => {
-                    tracing::error!("Failed to initialize CA manager: {} - HTTPS capture disabled", e);
+                    tracing::error!("[ForwardProxy] ✗ CA 管理器初始化失败: {} - HTTPS 抓取已禁用", e);
                     None
                 }
             }
         } else {
+            tracing::info!("[ForwardProxy] HTTPS 解密未启用");
             None
         };
 
-        let listener = TcpListener::bind(addr).await?;
-        tracing::info!("Forward proxy listening on {}", addr);
+        let listener = TcpListener::bind(addr).await.map_err(|e| {
+            tracing::error!("[ForwardProxy] ✗ 端口 {} 绑定失败: {}", port, e);
+            e
+        })?;
+        tracing::info!("[ForwardProxy] ✓ 监听已启动 {}", addr);
 
         let ca_manager_clone = ca_manager.clone();
         let mitm_config_clone = mitm_config.clone();
 
         tokio::spawn(async move {
             tokio::pin!(shutdown_rx);
+            let mut conn_count: u64 = 0;
             loop {
                 let accept_result = tokio::select! {
                     result = listener.accept() => result,
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Forward proxy shutting down");
+                        tracing::info!("[ForwardProxy] 收到关闭信号，已处理 {} 个连接", conn_count);
                         return;
                     }
                 };
 
                 match accept_result {
                     Ok((stream, client_addr)) => {
+                        conn_count += 1;
+                        if conn_count <= 5 || conn_count % 50 == 0 {
+                            tracing::info!("[ForwardProxy] 新连接 #{} 来自 {}", conn_count, client_addr);
+                        }
                         let engine_tx = engine_tx.clone();
                         let ca_manager = ca_manager_clone.clone();
                         let mitm_config = mitm_config_clone.clone();
@@ -86,12 +98,12 @@ impl ForwardProxy {
                             if let Err(e) = handle_raw_connection(
                                 stream, client_addr, engine_tx, max_body_size, ca_manager, &mitm_config,
                             ).await {
-                                tracing::debug!("Connection error from {}: {}", client_addr, e);
+                                tracing::debug!("[ForwardProxy] 连接处理错误 {}: {}", client_addr, e);
                             }
                         });
                     }
                     Err(e) => {
-                        tracing::error!("Accept error: {}", e);
+                        tracing::error!("[ForwardProxy] Accept 错误: {}", e);
                     }
                 }
             }
@@ -145,6 +157,7 @@ async fn handle_raw_connection(
     let session_id = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
 
     if method.eq_ignore_ascii_case("CONNECT") {
+        tracing::info!("[ForwardProxy] CONNECT 请求 | target={} | source={}", request_target, source_ip);
         if let Some(ref ca) = ca_manager {
             let client_stream = reader.into_inner();
             mitm_proxy::handle_mitm_connect(
@@ -152,12 +165,14 @@ async fn handle_raw_connection(
                 engine_tx, ca.clone(), mitm_config, max_body_size,
             ).await
         } else {
+            tracing::debug!("[ForwardProxy] CONNECT 隧道模式（无 MITM）| target={}", request_target);
             handle_connect_tunnel(
                 reader, session_id, request_target, &raw_headers,
                 &source_ip, timestamp, engine_tx,
             ).await
         }
     } else {
+        tracing::info!("[ForwardProxy] HTTP 请求 | method={} | target={} | source={}", method, request_target, source_ip);
         handle_http_request(
             reader, session_id, method, request_target, raw_headers,
             source_ip, timestamp, engine_tx, max_body_size,
@@ -226,7 +241,7 @@ async fn handle_connect_tunnel(
     let remote_stream = match tokio::net::TcpStream::connect((host.as_str(), port)).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("CONNECT: Failed to connect to {}:{} - {}", host, port, e);
+            tracing::warn!("[ForwardProxy] CONNECT: 连接 {}:{} 失败 - {}", host, port, e);
             let mut stream = reader.into_inner();
             let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
             return Ok(());
@@ -241,17 +256,17 @@ async fn handle_connect_tunnel(
     let mut client_stream = reader.into_inner();
     let _ = client_stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
 
-    tracing::debug!("CONNECT tunnel established to {}:{}", host, port);
+    tracing::debug!("[ForwardProxy] CONNECT 隧道建立 {}:{}", host, port);
 
     let (mut cr, mut cw) = client_stream.split();
     let (mut rr, mut rw) = tokio::io::split(remote_stream);
 
     tokio::select! {
         r = tokio::io::copy(&mut cr, &mut rw) => {
-            if let Err(e) = r { tracing::debug!("CONNECT tunnel c->r error: {}", e); }
+            if let Err(e) = r { tracing::debug!("[ForwardProxy] 隧道 c->r 错误: {}", e); }
         }
         r = tokio::io::copy(&mut rr, &mut cw) => {
-            if let Err(e) = r { tracing::debug!("CONNECT tunnel r->c error: {}", e); }
+            if let Err(e) = r { tracing::debug!("[ForwardProxy] 隧道 r->c 错误: {}", e); }
         }
     }
 
@@ -326,7 +341,7 @@ async fn handle_http_request(
     let upstream_stream = match tokio::net::TcpStream::connect((forward_host.as_str(), port)).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("Failed to connect to {}: {}", forward_host, e);
+            tracing::warn!("[ForwardProxy] 连接上游 {}:{} 失败: {}", forward_host, port, e);
             let mut client_stream = reader.into_inner();
             let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\nFailed to connect to upstream: {}", e.to_string().len(), e);
             let _ = client_stream.write_all(resp.as_bytes()).await;
@@ -339,7 +354,7 @@ async fn handle_http_request(
     let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::warn!("Handshake failed: {}", e);
+            tracing::warn!("[ForwardProxy] 上游握手失败: {}", e);
             let mut client_stream = reader.into_inner();
             let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\nUpstream handshake failed: {}", e.to_string().len(), e);
             let _ = client_stream.write_all(resp.as_bytes()).await;
@@ -349,7 +364,7 @@ async fn handle_http_request(
 
     tokio::spawn(async move {
         if let Err(e) = conn.await {
-            tracing::debug!("Upstream connection error: {}", e);
+            tracing::debug!("[ForwardProxy] 上游连接错误: {}", e);
         }
     });
 
@@ -358,7 +373,7 @@ async fn handle_http_request(
     let upstream_resp = match sender.send_request(forward_req).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("Forward request failed: {}", e);
+            tracing::warn!("[ForwardProxy] 转发请求失败: {}", e);
             let mut client_stream = reader.into_inner();
             let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\nUpstream request failed: {}", e.to_string().len(), e);
             let _ = client_stream.write_all(resp.as_bytes()).await;
