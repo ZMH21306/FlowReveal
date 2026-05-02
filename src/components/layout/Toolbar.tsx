@@ -192,7 +192,7 @@ export function Toolbar() {
       {isRunning && (
         <div className="text-xs text-[var(--color-accent)] font-mono flex items-center gap-1.5">
           <span>{currentMode.label} 端口 :40960</span>
-          {captureHttps && <span className="flex items-center gap-0.5" title="HTTPS 解密已启用">� HTTPS</span>}
+          {captureHttps && <span className="flex items-center gap-0.5" title="HTTPS 解密已启用" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>🔓 HTTPS</span>}
         </div>
       )}
 
