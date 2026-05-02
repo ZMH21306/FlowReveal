@@ -53,11 +53,11 @@ impl ForwardProxy {
         let ca_manager = if capture_https {
             match load_ca_manager(config) {
                 Ok(m) => {
-                    tracing::info!("[ForwardProxy] ✓ MITM CA 管理器初始化成功，HTTPS 解密已启用");
+                    tracing::info!("[ForwardProxy] MITM CA 管理器初始化成功，HTTPS 解密已启用");
                     Some(Arc::new(m))
                 }
                 Err(e) => {
-                    tracing::error!("[ForwardProxy] ✗ CA 管理器初始化失败: {} - HTTPS 抓取已禁用", e);
+                    tracing::error!("[ForwardProxy] CA 管理器初始化失败: {} - HTTPS 抓取已禁用", e);
                     None
                 }
             }
@@ -67,10 +67,10 @@ impl ForwardProxy {
         };
 
         let listener = TcpListener::bind(addr).await.map_err(|e| {
-            tracing::error!("[ForwardProxy] ✗ 端口 {} 绑定失败: {}", port, e);
+            tracing::error!("[ForwardProxy] 端口 {} 绑定失败: {}", port, e);
             e
         })?;
-        tracing::info!("[ForwardProxy] ✓ 监听已启动 {}", addr);
+        tracing::info!("[ForwardProxy] 监听已启动 {}", addr);
 
         let ca_manager_clone = ca_manager.clone();
         let mitm_config_clone = mitm_config.clone();
@@ -330,6 +330,7 @@ async fn handle_http_request(
         duration_us: None,
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     };
 
     // === 规则检查点（请求阶段） ===
@@ -367,6 +368,7 @@ async fn handle_http_request(
                     duration_us: Some(0),
                     cookies: vec![],
                     raw_tls_info: None,
+                    stream_id: None,
                 };
                 let _ = engine_tx.send(mock_resp_msg).await;
                 let mut client_stream = reader.into_inner();
@@ -425,6 +427,7 @@ async fn handle_http_request(
                     duration_us: Some(0),
                     cookies: vec![],
                     raw_tls_info: None,
+                    stream_id: None,
                 };
                 let _ = engine_tx.send(redirect_resp_msg).await;
                 let mut client_stream = reader.into_inner();
@@ -559,6 +562,7 @@ async fn handle_http_request_forward(
         duration_us: Some(duration_us),
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     };
 
     let _ = engine_tx.send(resp_msg).await;
@@ -604,6 +608,7 @@ fn build_connect_request(
         duration_us: None,
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     }
 }
 
@@ -640,6 +645,7 @@ fn build_tunnel_response(
         duration_us: Some(duration_us),
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     }
 }
 
