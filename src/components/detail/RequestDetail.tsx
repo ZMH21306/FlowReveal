@@ -1,200 +1,21 @@
 import { useState } from "react";
 import { useStore } from "../../store";
-import { formatDuration, formatSize } from "../../lib/utils";
+import { formatDuration } from "../../lib/utils";
 import { exportHar, replayRequest } from "../../lib/tauri-bindings";
+import { HeadersTable } from "./HeadersTable";
+import { BodyView } from "./BodyView";
+import { CookiesView } from "./CookiesView";
+import { TimingView } from "./TimingView";
+import { TlsInfoBadge } from "./TlsInfoBadge";
 
 type DetailTab = "headers" | "body" | "cookies" | "timing";
 
-function HeadersTable({ headers }: { headers: [string, string][] }) {
-  if (headers.length === 0) {
-    return <div className="text-xs text-[var(--color-text-secondary)] italic">No headers</div>;
-  }
-  return (
-    <table className="w-full text-xs">
-      <tbody>
-        {headers.map(([key, value], i) => (
-          <tr key={i} className="border-b border-[var(--color-border)]">
-            <td className="py-1 pr-4 text-[var(--color-accent)] font-mono whitespace-nowrap align-top">
-              {key}
-            </td>
-            <td className="py-1 text-[var(--color-text-primary)] break-all">
-              {value}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function BodyView({ body, bodySize, bodyTruncated, contentType }: {
-  body: number[] | null;
-  bodySize: number;
-  bodyTruncated: boolean;
-  contentType: string | null;
-}) {
-  if (!body || bodySize === 0) {
-    return <div className="text-xs text-[var(--color-text-secondary)] italic">No body</div>;
-  }
-
-  const text = new TextDecoder().decode(new Uint8Array(body));
-  const isJson = contentType?.includes("application/json");
-  const isXml = contentType?.includes("xml");
-  const isText = contentType?.startsWith("text/") || isJson || isXml;
-
-  let displayText = text;
-  if (isJson) {
-    try {
-      displayText = JSON.stringify(JSON.parse(text), null, 2);
-    } catch {
-      // not valid JSON, show raw
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs text-[var(--color-text-secondary)]">
-          {formatSize(bodySize)}
-        </span>
-        {bodyTruncated && (
-          <span className="text-xs text-[var(--color-warning)]">
-            (truncated)
-          </span>
-        )}
-        {contentType && (
-          <span className="text-xs text-[var(--color-text-secondary)]">
-            {contentType}
-          </span>
-        )}
-      </div>
-      {isText ? (
-        <pre className="text-xs text-[var(--color-text-primary)] bg-[var(--color-bg-secondary)] p-3 rounded overflow-x-auto max-h-80 whitespace-pre-wrap break-all">
-          {displayText}
-        </pre>
-      ) : (
-        <div className="text-xs text-[var(--color-text-secondary)] bg-[var(--color-bg-secondary)] p-3 rounded">
-          Binary data ({formatSize(bodySize)})
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CookiesView({ headers }: { headers: [string, String][] }) {
-  const cookies = headers
-    .filter(([k]) => k.toLowerCase() === "cookie")
-    .flatMap(([, v]) =>
-      v.split(";").map((pair) => {
-        const [name, ...rest] = pair.trim().split("=");
-        return { name: name?.trim() || "", value: rest.join("=").trim() };
-      })
-    );
-
-  const setCookies = headers
-    .filter(([k]) => k.toLowerCase() === "set-cookie")
-    .map(([, v]) => {
-      const [nameValue, ...attrs] = v.split("; ");
-      const [name, ...rest] = nameValue.split("=");
-      return {
-        name: name?.trim() || "",
-        value: rest.join("=").trim(),
-        attrs: attrs.join("; "),
-      };
-    });
-
-  if (cookies.length === 0 && setCookies.length === 0) {
-    return <div className="text-xs text-[var(--color-text-secondary)] italic">No cookies</div>;
-  }
-
-  return (
-    <div className="space-y-3">
-      {cookies.length > 0 && (
-        <div>
-          <div className="text-xs font-semibold text-[var(--color-text-secondary)] mb-1">Request Cookies</div>
-          <table className="w-full text-xs">
-            <tbody>
-              {cookies.map((c, i) => (
-                <tr key={i} className="border-b border-[var(--color-border)]">
-                  <td className="py-1 pr-4 text-[var(--color-accent)] font-mono">{c.name}</td>
-                  <td className="py-1 text-[var(--color-text-primary)] break-all">{c.value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {setCookies.length > 0 && (
-        <div>
-          <div className="text-xs font-semibold text-[var(--color-text-secondary)] mb-1">Response Set-Cookie</div>
-          <table className="w-full text-xs">
-            <tbody>
-              {setCookies.map((c, i) => (
-                <tr key={i} className="border-b border-[var(--color-border)]">
-                  <td className="py-1 pr-4 text-[var(--color-accent)] font-mono">{c.name}</td>
-                  <td className="py-1 text-[var(--color-text-primary)] break-all">{c.value}</td>
-                  <td className="py-1 pl-4 text-[var(--color-text-secondary)] text-[10px]">{c.attrs}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TimingView({ req, resp }: { req: { timestamp: number }; resp: { timestamp: number; duration_us: number | null } | null }) {
-  const reqTime = new Date(req.timestamp / 1000);
-  const duration = resp?.duration_us;
-
-  return (
-    <div className="space-y-2 text-xs">
-      <div className="flex justify-between">
-        <span className="text-[var(--color-text-secondary)]">Request Started</span>
-        <span className="text-[var(--color-text-primary)] font-mono">
-          {reqTime.toLocaleTimeString("zh-CN", { hour12: false, fractionalSecondDigits: 3 })}
-        </span>
-      </div>
-      {duration != null && (
-        <div className="flex justify-between">
-          <span className="text-[var(--color-text-secondary)]">Total Duration</span>
-          <span className="text-[var(--color-text-primary)] font-mono">{formatDuration(duration)}</span>
-        </div>
-      )}
-      {duration != null && (
-        <div className="mt-2">
-          <div className="h-2 bg-[var(--color-bg-tertiary)] rounded overflow-hidden">
-            <div
-              className="h-full bg-[var(--color-accent)] rounded"
-              style={{ width: `${Math.min(100, (duration / 1_000_000) * 100)}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-1 text-[10px] text-[var(--color-text-secondary)]">
-            <span>0ms</span>
-            <span>{(duration / 1_000_000).toFixed(2)}s</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TlsInfoBadge({ tlsInfo }: { tlsInfo: { version: string; cipher_suite: string; server_name: string | null } }) {
-  return (
-    <div className="flex items-center gap-2 text-xs text-[var(--color-accent)] bg-[var(--color-bg-tertiary)] px-2 py-1 rounded">
-      <span>🔓 {tlsInfo.version}</span>
-      <span className="text-[var(--color-text-secondary)]">|</span>
-      <span>{tlsInfo.cipher_suite}</span>
-      {tlsInfo.server_name && (
-        <>
-          <span className="text-[var(--color-text-secondary)]">|</span>
-          <span>SNI: {tlsInfo.server_name}</span>
-        </>
-      )}
-    </div>
-  );
-}
+const TABS: { key: DetailTab; label: string }[] = [
+  { key: "headers", label: "请求头" },
+  { key: "body", label: "请求体" },
+  { key: "cookies", label: "Cookie" },
+  { key: "timing", label: "耗时" },
+];
 
 export function RequestDetail() {
   const sessions = useStore((s) => s.sessions);
@@ -207,7 +28,7 @@ export function RequestDetail() {
   if (!session) {
     return (
       <div className="flex items-center justify-center h-full text-[var(--color-text-secondary)] text-sm bg-[var(--color-bg-primary)]">
-        Select a request to view details
+        选择一个请求以查看详情
       </div>
     );
   }
@@ -215,21 +36,14 @@ export function RequestDetail() {
   const req = session.request;
   const resp = session.response;
 
-  const tabs: { key: DetailTab; label: string }[] = [
-    { key: "headers", label: "Headers" },
-    { key: "body", label: "Body" },
-    { key: "cookies", label: "Cookies" },
-    { key: "timing", label: "Timing" },
-  ];
-
   const handleReplay = async () => {
     if (!session) return;
-    setReplayStatus("Replaying...");
+    setReplayStatus("重放中...");
     try {
       const result = await replayRequest(session.id);
       setReplayStatus(result);
     } catch (e) {
-      setReplayStatus(`Error: ${e}`);
+      setReplayStatus(`错误: ${e}`);
     }
     setTimeout(() => setReplayStatus(null), 5000);
   };
@@ -267,14 +81,14 @@ export function RequestDetail() {
             <button
               onClick={handleReplay}
               className="px-2 py-1 text-[10px] bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded border border-[var(--color-border)] transition-colors"
-              title="Replay this request"
+              title="重放此请求"
             >
-              ↻ Replay
+              ↻ 重放
             </button>
             <button
               onClick={handleExportHar}
               className="px-2 py-1 text-[10px] bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded border border-[var(--color-border)] transition-colors"
-              title="Export as HAR"
+              title="导出为 HAR 文件"
             >
               ↓ HAR
             </button>
@@ -283,14 +97,14 @@ export function RequestDetail() {
         <div className="flex flex-wrap gap-3 text-xs text-[var(--color-text-secondary)]">
           {resp?.status_code && (
             <span style={{ color: resp.status_code >= 400 ? "var(--color-error)" : resp.status_code >= 300 ? "var(--color-warning)" : "var(--color-success)" }}>
-              Status: {resp.status_code}
+              状态码: {resp.status_code}
             </span>
           )}
-          <span>Protocol: {req.protocol}</span>
-          <span>Scheme: {req.scheme}</span>
-          {resp?.duration_us && <span>Duration: {formatDuration(resp.duration_us)}</span>}
+          <span>协议: {req.protocol}</span>
+          <span>协议类型: {req.scheme}</span>
+          {resp?.duration_us && <span>耗时: {formatDuration(resp.duration_us)}</span>}
           {req.process_name && (
-            <span>Process: {req.process_name} ({req.process_id})</span>
+            <span>进程: {req.process_name} ({req.process_id})</span>
           )}
         </div>
         {req.raw_tls_info && (
@@ -304,7 +118,7 @@ export function RequestDetail() {
       </div>
 
       <div className="flex border-b border-[var(--color-border)]">
-        {tabs.map((tab) => (
+        {TABS.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -323,12 +137,12 @@ export function RequestDetail() {
         {activeTab === "headers" && (
           <div className="space-y-4">
             <div>
-              <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Request Headers</h4>
+              <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">请求头</h4>
               <HeadersTable headers={req.headers} />
             </div>
             {resp && (
               <div>
-                <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Response Headers</h4>
+                <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">响应头</h4>
                 <HeadersTable headers={resp.headers} />
               </div>
             )}
@@ -338,7 +152,7 @@ export function RequestDetail() {
         {activeTab === "body" && (
           <div className="space-y-4">
             <div>
-              <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Request Body</h4>
+              <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">请求体</h4>
               <BodyView
                 body={req.body}
                 bodySize={req.body_size}
@@ -348,7 +162,7 @@ export function RequestDetail() {
             </div>
             {resp && (
               <div>
-                <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Response Body</h4>
+                <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">响应体</h4>
                 <BodyView
                   body={resp.body}
                   bodySize={resp.body_size}
@@ -363,12 +177,12 @@ export function RequestDetail() {
         {activeTab === "cookies" && (
           <div className="space-y-4">
             <div>
-              <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Request Cookies</h4>
+              <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">请求 Cookie</h4>
               <CookiesView headers={req.headers} />
             </div>
             {resp && (
               <div>
-                <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Response Cookies</h4>
+                <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">响应 Cookie</h4>
                 <CookiesView headers={resp.headers} />
               </div>
             )}
