@@ -4,6 +4,7 @@ import { startCapture, stopCapture, exportHar } from "../../lib/tauri-bindings";
 import type { CaptureConfig, CaptureMode } from "../../types";
 
 const CAPTURE_MODES: { value: CaptureMode; label: string; desc: string }[] = [
+  { value: "DualProxy", label: "双代理模式", desc: "正向代理 + 透明代理，最大化流量捕获（推荐）" },
   { value: "ForwardProxy", label: "正向代理", desc: "自动代理 + MITM 解密" },
   { value: "TransparentProxy", label: "透明代理", desc: "WFP 透明代理（需管理员权限）" },
 ];
@@ -46,7 +47,7 @@ function ModeDropdown({
         </svg>
       </button>
       {open && !disabled && (
-        <div className="absolute top-full left-0 mt-1 z-50 min-w-[200px] bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded shadow-lg overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 z-50 min-w-[260px] bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] rounded shadow-lg overflow-hidden">
           {CAPTURE_MODES.map((mode) => (
             <button
               key={mode.value}
@@ -76,7 +77,7 @@ export function Toolbar() {
   const clearRequests = useStore((s) => s.clearRequests);
   const setCaptureStatus = useStore((s) => s.setCaptureStatus);
   const totalSessions = useStore((s) => s.totalSessions);
-  const [captureMode, setCaptureMode] = useState<CaptureMode>("ForwardProxy");
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("DualProxy");
   const [captureHttps, setCaptureHttps] = useState(true);
   const [pending, setPending] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -104,6 +105,7 @@ export function Toolbar() {
           ca_key_path: null,
           mitm_bypass_hosts: [],
           proxy_port: 40960,
+          transparent_proxy_port: 40961,
         };
         await startCapture(config);
         setCaptureStatus("Running");
@@ -118,7 +120,15 @@ export function Toolbar() {
     }
   };
 
-  const currentMode = CAPTURE_MODES.find((m) => m.value === captureMode)!;
+  const getPortDisplay = () => {
+    if (captureMode === "DualProxy") {
+      return "正向 :40960 | 透明 :40961";
+    } else if (captureMode === "ForwardProxy") {
+      return "正向 :40960";
+    } else {
+      return "透明 :40961";
+    }
+  };
 
   return (
     <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
@@ -191,7 +201,7 @@ export function Toolbar() {
 
       {isRunning && (
         <div className="text-xs text-[var(--color-accent)] font-mono flex items-center gap-1.5">
-          <span>{currentMode.label} 端口 :40960</span>
+          <span>{getPortDisplay()}</span>
           {captureHttps && <span className="flex items-center gap-0.5" title="HTTPS 解密已启用" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>🔓 HTTPS</span>}
         </div>
       )}
