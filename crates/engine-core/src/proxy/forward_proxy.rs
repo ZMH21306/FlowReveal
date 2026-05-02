@@ -16,6 +16,7 @@ use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme};
 use crate::mitm::{CaManager, MitmConfig};
 use crate::proxy::mitm_proxy;
 use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header};
+use crate::rules::{RuleEngine, RuleExecutionResult, executor::RuleExecutor};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -31,6 +32,7 @@ impl ForwardProxy {
         port: u16,
         config: &CaptureConfig,
         engine_tx: mpsc::Sender<HttpMessage>,
+        rule_engine: Arc<RuleEngine>,
     ) -> Result<ForwardProxyHandle, EngineError> {
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -94,9 +96,10 @@ impl ForwardProxy {
                         let engine_tx = engine_tx.clone();
                         let ca_manager = ca_manager_clone.clone();
                         let mitm_config = mitm_config_clone.clone();
+                        let rule_engine = rule_engine.clone();
                         tokio::spawn(async move {
                             if let Err(e) = handle_raw_connection(
-                                stream, client_addr, engine_tx, max_body_size, ca_manager, &mitm_config,
+                                stream, client_addr, engine_tx, max_body_size, ca_manager, &mitm_config, rule_engine,
                             ).await {
                                 tracing::debug!("[ForwardProxy] 连接处理错误 {}: {}", client_addr, e);
                             }
@@ -133,6 +136,7 @@ async fn handle_raw_connection(
     max_body_size: usize,
     ca_manager: Option<Arc<CaManager>>,
     mitm_config: &MitmConfig,
+    rule_engine: Arc<RuleEngine>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = BufReader::new(stream);
     let mut first_line = String::new();
@@ -162,7 +166,7 @@ async fn handle_raw_connection(
             let client_stream = reader.into_inner();
             mitm_proxy::handle_mitm_connect(
                 client_stream, request_target, &raw_headers, &source_ip,
-                engine_tx, ca.clone(), mitm_config, max_body_size,
+                engine_tx, ca.clone(), mitm_config, max_body_size, rule_engine,
             ).await
         } else {
             tracing::debug!("[ForwardProxy] CONNECT 隧道模式（无 MITM）| target={}", request_target);
@@ -175,7 +179,7 @@ async fn handle_raw_connection(
         tracing::info!("[ForwardProxy] HTTP 请求 | method={} | target={} | source={}", method, request_target, source_ip);
         handle_http_request(
             reader, session_id, method, request_target, raw_headers,
-            source_ip, timestamp, engine_tx, max_body_size,
+            source_ip, timestamp, engine_tx, max_body_size, rule_engine,
         ).await
     }
 }
@@ -279,11 +283,12 @@ async fn handle_http_request(
     session_id: u64,
     method: &str,
     request_target: &str,
-    req_headers: Vec<(String, String)>,
+    mut req_headers: Vec<(String, String)>,
     source_ip: String,
     timestamp: u64,
     engine_tx: mpsc::Sender<HttpMessage>,
     max_body_size: usize,
+    rule_engine: Arc<RuleEngine>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let host = extract_header(&req_headers, "host").unwrap_or_else(|| "unknown".to_string());
     let forward_url = if request_target.starts_with("http://") || request_target.starts_with("https://") {
@@ -327,8 +332,132 @@ async fn handle_http_request(
         raw_tls_info: None,
     };
 
+    // === 规则检查点（请求阶段） ===
+    if let Some(result) = rule_engine.apply(&req_msg, None).await {
+        match result {
+            RuleExecutionResult::AutoReply { status_code, status_text, headers, body, delay_ms } => {
+                tracing::info!("[ForwardProxy] 自动回复规则触发 | status={} | delay={}ms", status_code, delay_ms);
+                let _ = engine_tx.send(req_msg).await;
+                if delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
+                let mock_resp_msg = HttpMessage {
+                    id: session_id + 1,
+                    session_id,
+                    direction: MessageDirection::Response,
+                    protocol: HttpProtocol::HTTP1_1,
+                    scheme: Scheme::Http,
+                    method: None,
+                    url: None,
+                    status_code: Some(status_code),
+                    status_text: Some(status_text.clone()),
+                    headers: headers.clone(),
+                    body: if body.is_empty() { None } else { Some(body.clone()) },
+                    body_size: body.len(),
+                    body_truncated: false,
+                    content_type: extract_header(&headers, "content-type"),
+                    process_name: None,
+                    process_id: None,
+                    process_path: None,
+                    source_ip: Some(host.clone()),
+                    dest_ip: Some(source_ip.clone()),
+                    source_port: None,
+                    dest_port: None,
+                    timestamp: now_us(),
+                    duration_us: Some(0),
+                    cookies: vec![],
+                    raw_tls_info: None,
+                };
+                let _ = engine_tx.send(mock_resp_msg).await;
+                let mut client_stream = reader.into_inner();
+                write_response_to_client(&mut client_stream, status_code, &Some(status_text), &headers, &body).await?;
+                return Ok(());
+            }
+            RuleExecutionResult::HeaderModified { request_actions, response_actions } => {
+                tracing::info!("[ForwardProxy] 消息头修改规则触发 | 请求动作={} 响应动作={}", request_actions.len(), response_actions.len());
+                RuleExecutor::apply_header_actions(&mut req_headers, &request_actions);
+                // 继续正常流程，但使用修改后的请求头
+                // response_actions 将在响应阶段应用
+                let _ = engine_tx.send(req_msg).await;
+                return handle_http_request_forward(
+                    reader, session_id, method, request_target, req_headers,
+                    source_ip, forward_url, req_body_bytes, engine_tx, max_body_size,
+                    rule_engine, response_actions,
+                ).await;
+            }
+            RuleExecutionResult::Redirected { new_url, redirect_type, preserve_query, preserve_path } => {
+                let final_url = RuleExecutor::build_redirect_url(&forward_url, &new_url, preserve_query, preserve_path);
+                let redirect_code = match redirect_type {
+                    crate::rules::RedirectType::Permanent301 => 301,
+                    crate::rules::RedirectType::Temporary302 => 302,
+                    crate::rules::RedirectType::Temporary307 => 307,
+                    crate::rules::RedirectType::Permanent308 => 308,
+                };
+                tracing::info!("[ForwardProxy] 重定向规则触发 | {} -> {} | status={}", forward_url, final_url, redirect_code);
+                let _ = engine_tx.send(req_msg).await;
+                let redirect_headers = vec![
+                    ("Location".to_string(), final_url.clone()),
+                    ("Content-Length".to_string(), "0".to_string()),
+                ];
+                let redirect_resp_msg = HttpMessage {
+                    id: session_id + 1,
+                    session_id,
+                    direction: MessageDirection::Response,
+                    protocol: HttpProtocol::HTTP1_1,
+                    scheme: Scheme::Http,
+                    method: None,
+                    url: None,
+                    status_code: Some(redirect_code),
+                    status_text: None,
+                    headers: redirect_headers.clone(),
+                    body: None,
+                    body_size: 0,
+                    body_truncated: false,
+                    content_type: None,
+                    process_name: None,
+                    process_id: None,
+                    process_path: None,
+                    source_ip: Some(host.clone()),
+                    dest_ip: Some(source_ip.clone()),
+                    source_port: None,
+                    dest_port: None,
+                    timestamp: now_us(),
+                    duration_us: Some(0),
+                    cookies: vec![],
+                    raw_tls_info: None,
+                };
+                let _ = engine_tx.send(redirect_resp_msg).await;
+                let mut client_stream = reader.into_inner();
+                write_response_to_client(&mut client_stream, redirect_code, &None, &redirect_headers, &[]).await?;
+                return Ok(());
+            }
+        }
+    }
+
     let _ = engine_tx.send(req_msg).await;
 
+    handle_http_request_forward(
+        reader, session_id, method, request_target, req_headers,
+        source_ip, forward_url, req_body_bytes, engine_tx, max_body_size,
+        rule_engine, vec![],
+    ).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_http_request_forward(
+    reader: BufReader<tokio::net::TcpStream>,
+    session_id: u64,
+    method: &str,
+    request_target: &str,
+    req_headers: Vec<(String, String)>,
+    source_ip: String,
+    forward_url: String,
+    req_body_bytes: Vec<u8>,
+    engine_tx: mpsc::Sender<HttpMessage>,
+    max_body_size: usize,
+    _rule_engine: Arc<RuleEngine>,
+    pending_response_actions: Vec<crate::rules::HeaderAction>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let start = std::time::Instant::now();
 
     let forward_uri: hyper::Uri = forward_url.parse().unwrap_or_else(|_| {
@@ -384,7 +513,7 @@ async fn handle_http_request(
     let duration_us = start.elapsed().as_micros() as u64;
     let status_code = upstream_resp.status().as_u16();
     let status_reason = upstream_resp.status().canonical_reason().map(|s| s.to_string());
-    let resp_headers: Vec<(String, String)> = upstream_resp
+    let mut resp_headers: Vec<(String, String)> = upstream_resp
         .headers()
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
@@ -397,6 +526,12 @@ async fn handle_http_request(
         .unwrap_or_default();
     let resp_body_size = resp_body_bytes.len();
     let (resp_body_captured, resp_body_truncated) = truncate_body(&resp_body_bytes, max_body_size);
+
+    // === 规则检查点（响应阶段） ===
+    if !pending_response_actions.is_empty() {
+        RuleExecutor::apply_header_actions(&mut resp_headers, &pending_response_actions);
+        tracing::info!("[ForwardProxy] 响应头修改规则应用 | 修改了 {} 个动作", pending_response_actions.len());
+    }
 
     let resp_msg = HttpMessage {
         id: session_id + 1,
