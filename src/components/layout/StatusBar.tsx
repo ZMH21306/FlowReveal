@@ -1,6 +1,12 @@
 import { useStore } from "../../store";
 import { formatSize } from "../../lib/utils";
 
+const STATUS_LABELS: Record<string, string> = {
+  Idle: "空闲",
+  Running: "运行中",
+  Error: "错误",
+};
+
 export function StatusBar() {
   const stats = useStore((s) => s.stats);
   const captureStatus = useStore((s) => s.captureStatus);
@@ -22,16 +28,16 @@ export function StatusBar() {
                 : "bg-[var(--color-text-secondary)]"
           }`}
         />
-        {captureStatus}
+        {STATUS_LABELS[captureStatus] ?? captureStatus}
       </span>
-      <span>Sessions: {stats.total_sessions}</span>
-      <span>Active: {stats.active_sessions}</span>
+      <span>会话: {stats.total_sessions}</span>
+      <span>活跃: {stats.active_sessions}</span>
       {httpsCount > 0 && (
         <span className="text-[var(--color-accent)]">
-          🔒 Decrypted: {httpsCount}
+          🔒 已解密: {httpsCount}
         </span>
       )}
-      <span>Data: {formatSize(stats.bytes_captured)}</span>
+      <span>数据量: {formatSize(stats.bytes_captured)}</span>
     </div>
   );
 }
