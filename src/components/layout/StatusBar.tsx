@@ -31,8 +31,8 @@ export function StatusBar() {
       <span>会话: {totalSessions}</span>
       <span>活跃: {activeSessions}</span>
       {decryptedCount > 0 && (
-        <span className="text-[var(--color-accent)]">
-          � 已解密: {decryptedCount}
+        <span className="text-[var(--color-accent)]" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>
+          🔓 已解密: {decryptedCount}
         </span>
       )}
       <span>数据量: {formatSize(bytesCaptured)}</span>
