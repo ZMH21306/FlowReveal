@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HttpMessage, HttpSession, EngineStats } from "../types";
+import type { HttpMessage, HttpSession } from "../types";
 
 export type FilterMethod = "ALL" | "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "CONNECT";
 export type FilterScheme = "ALL" | "Http" | "Https";
@@ -24,15 +24,18 @@ interface StoreState {
   sessionList: number[];
   selectedId: number | null;
   captureStatus: string;
-  stats: EngineStats;
   filter: TrafficFilter;
   filteredSessionList: number[];
+
+  totalSessions: number;
+  activeSessions: number;
+  bytesCaptured: number;
+  decryptedCount: number;
 
   processMessage: (msg: HttpMessage) => void;
   selectRequest: (id: number | null) => void;
   clearRequests: () => void;
   setCaptureStatus: (status: string) => void;
-  setStats: (stats: EngineStats) => void;
   setFilter: (filter: Partial<TrafficFilter>) => void;
   resetFilter: () => void;
 }
@@ -41,12 +44,12 @@ function matchesFilter(session: HttpSession, filter: TrafficFilter): boolean {
   const req = session.request;
   const resp = session.response;
 
-  if (filter.method !== "ALL" && req.method?.toUpperCase() !== filter.method) {
-    return false;
+  if (filter.method !== "ALL") {
+    if (req.method?.toUpperCase() !== filter.method) return false;
   }
 
-  if (filter.scheme !== "ALL" && req.scheme !== filter.scheme) {
-    return false;
+  if (filter.scheme !== "ALL") {
+    if (req.scheme !== filter.scheme) return false;
   }
 
   if (filter.status !== "ALL" && resp?.status_code != null) {
@@ -58,17 +61,15 @@ function matchesFilter(session: HttpSession, filter: TrafficFilter): boolean {
     if (group === "5xx" && (code < 500 || code >= 600)) return false;
   }
 
-  if (filter.searchText) {
-    const search = filter.searchText.toLowerCase();
+  if (filter.searchText.trim()) {
+    const search = filter.searchText.toLowerCase().trim();
     const urlMatch = req.url?.toLowerCase().includes(search) ?? false;
     const hostMatch = req.headers.some(
       ([k, v]) => k.toLowerCase() === "host" && v.toLowerCase().includes(search)
     );
     const methodMatch = req.method?.toLowerCase().includes(search) ?? false;
     const processMatch = req.process_name?.toLowerCase().includes(search) ?? false;
-    if (!urlMatch && !hostMatch && !methodMatch && !processMatch) {
-      return false;
-    }
+    if (!urlMatch && !hostMatch && !methodMatch && !processMatch) return false;
   }
 
   return true;
@@ -93,24 +94,33 @@ function computeFiltered(
   });
 }
 
+function computeStats(sessions: Map<number, HttpSession>) {
+  let total = 0;
+  let active = 0;
+  let bytes = 0;
+  let decrypted = 0;
+
+  for (const s of sessions.values()) {
+    total++;
+    if (!s.response) active++;
+    bytes += (s.request.body_size || 0) + (s.response?.body_size || 0);
+    if (s.request.raw_tls_info != null) decrypted++;
+  }
+
+  return { totalSessions: total, activeSessions: active, bytesCaptured: bytes, decryptedCount: decrypted };
+}
+
 export const useStore = create<StoreState>((set) => ({
   sessions: new Map(),
   sessionList: [],
   selectedId: null,
   captureStatus: "Idle",
-  stats: {
-    total_sessions: 0,
-    active_sessions: 0,
-    bytes_captured: 0,
-    tls_handshakes: 0,
-    hook_injections: 0,
-    http1_requests: 0,
-    http2_requests: 0,
-    ws_frames: 0,
-    filtered_out: 0,
-  },
   filter: { ...DEFAULT_FILTER },
   filteredSessionList: [],
+  totalSessions: 0,
+  activeSessions: 0,
+  bytesCaptured: 0,
+  decryptedCount: 0,
 
   processMessage: (msg: HttpMessage) =>
     set((state) => {
@@ -128,10 +138,12 @@ export const useStore = create<StoreState>((set) => ({
         newSessions.set(msg.session_id, session);
         const newSessionList = [...state.sessionList, msg.session_id];
         const newFiltered = computeFiltered(newSessionList, newSessions, state.filter);
+        const stats = computeStats(newSessions);
         return {
           sessions: newSessions,
           sessionList: newSessionList,
           filteredSessionList: newFiltered,
+          ...stats,
         };
       } else {
         const existing = newSessions.get(msg.session_id);
@@ -140,9 +152,11 @@ export const useStore = create<StoreState>((set) => ({
           newSessions.set(msg.session_id, updated);
         }
         const newFiltered = computeFiltered(state.sessionList, newSessions, state.filter);
+        const stats = computeStats(newSessions);
         return {
           sessions: newSessions,
           filteredSessionList: newFiltered,
+          ...stats,
         };
       }
     }),
@@ -154,9 +168,12 @@ export const useStore = create<StoreState>((set) => ({
       sessionList: [],
       selectedId: null,
       filteredSessionList: [],
+      totalSessions: 0,
+      activeSessions: 0,
+      bytesCaptured: 0,
+      decryptedCount: 0,
     }),
   setCaptureStatus: (status) => set({ captureStatus: status }),
-  setStats: (stats) => set({ stats }),
 
   setFilter: (partial) =>
     set((state) => {
