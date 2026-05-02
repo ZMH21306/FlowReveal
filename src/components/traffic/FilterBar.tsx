@@ -1,7 +1,7 @@
 import { useStore, type FilterMethod, type FilterScheme, type FilterStatus } from "../../store";
 
 const METHODS: { value: FilterMethod; label: string }[] = [
-  { value: "ALL", label: "All" },
+  { value: "ALL", label: "全部" },
   { value: "GET", label: "GET" },
   { value: "POST", label: "POST" },
   { value: "PUT", label: "PUT" },
@@ -13,17 +13,17 @@ const METHODS: { value: FilterMethod; label: string }[] = [
 ];
 
 const SCHEMES: { value: FilterScheme; label: string }[] = [
-  { value: "ALL", label: "All" },
+  { value: "ALL", label: "全部" },
   { value: "Http", label: "HTTP" },
   { value: "Https", label: "HTTPS" },
 ];
 
 const STATUSES: { value: FilterStatus; label: string }[] = [
-  { value: "ALL", label: "All" },
-  { value: "2xx", label: "2xx" },
-  { value: "3xx", label: "3xx" },
-  { value: "4xx", label: "4xx" },
-  { value: "5xx", label: "5xx" },
+  { value: "ALL", label: "全部" },
+  { value: "2xx", label: "2xx 成功" },
+  { value: "3xx", label: "3xx 重定向" },
+  { value: "4xx", label: "4xx 客户端错误" },
+  { value: "5xx", label: "5xx 服务端错误" },
 ];
 
 export function FilterBar() {
@@ -41,7 +41,7 @@ export function FilterBar() {
           type="text"
           value={filter.searchText}
           onChange={(e) => setFilter({ searchText: e.target.value })}
-          placeholder="Filter by URL, host, method..."
+          placeholder="按 URL、主机、方法筛选..."
           className="w-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-3 py-1.5 pl-7 rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none placeholder:text-[var(--color-text-secondary)]"
         />
         <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -84,7 +84,7 @@ export function FilterBar() {
           onClick={resetFilter}
           className="text-xs text-[var(--color-accent)] hover:underline"
         >
-          Reset
+          重置
         </button>
       )}
 
