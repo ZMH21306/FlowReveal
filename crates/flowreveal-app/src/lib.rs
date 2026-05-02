@@ -6,12 +6,32 @@ use state::AppState;
 use tauri::Manager;
 
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
+    let log_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("FlowReveal")
+        .join("logs");
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "flowreveal.log");
+    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    use tracing_subscriber::prelude::*;
+
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_filter(env_filter.clone());
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file_writer)
+        .with_ansi(false)
+        .with_filter(env_filter);
+
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
+
+    tracing::info!("[Init] FlowReveal 日志系统已初始化，日志写入 {:?}", log_dir);
 
     let app_state = AppState::new();
     let cleanup_proxy = app_state.proxy_was_set.clone();
@@ -23,27 +43,36 @@ pub fn run() {
             let original = cleanup_original.blocking_lock();
             if let Some(ref orig) = *original {
                 match engine_core::platform_integration::windows::restore_system_proxy(orig) {
-                    Ok(()) => tracing::info!("Cleanup: System proxy restored on exit"),
-                    Err(e) => tracing::warn!("Cleanup: Failed to restore system proxy on exit: {}", e),
+                    Ok(()) => tracing::info!("[Cleanup] 退出时系统代理已恢复"),
+                    Err(e) => tracing::warn!("[Cleanup] 退出时系统代理恢复失败: {}", e),
                 }
             } else {
                 match engine_core::platform_integration::windows::clear_system_proxy() {
-                    Ok(()) => tracing::info!("Cleanup: System proxy cleared on exit"),
-                    Err(e) => tracing::warn!("Cleanup: Failed to clear system proxy on exit: {}", e),
+                    Ok(()) => tracing::info!("[Cleanup] 退出时系统代理已清除"),
+                    Err(e) => tracing::warn!("[Cleanup] 退出时系统代理清除失败: {}", e),
                 }
             }
         }
 
         if *cleanup_cert.blocking_read() {
             match engine_core::platform_integration::windows::uninstall_ca_certificate() {
-                Ok(()) => tracing::info!("Cleanup: CA certificate removed on exit"),
-                Err(e) => tracing::warn!("Cleanup: Failed to remove CA certificate on exit: {}", e),
+                Ok(()) => tracing::info!("[Cleanup] 退出时 CA 证书已移除"),
+                Err(e) => tracing::warn!("[Cleanup] 退出时 CA 证书移除失败: {}", e),
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            use engine_core::proxy::transparent_proxy::wfp_engine;
+            match wfp_engine::uninstall_redirect_filters() {
+                Ok(()) => tracing::info!("[Cleanup] 退出时 WFP 过滤器已卸载"),
+                Err(e) => tracing::warn!("[Cleanup] 退出时 WFP 过滤器卸载失败: {}", e),
             }
         }
     };
 
     ctrlc::set_handler(move || {
-        tracing::info!("Received Ctrl+C, cleaning up...");
+        tracing::info!("[Cleanup] 收到 Ctrl+C，正在清理...");
         cleanup_on_exit();
         std::process::exit(0);
     }).ok();
@@ -74,8 +103,8 @@ pub fn run() {
 
                 if cert_was_installed {
                     match engine_core::platform_integration::windows::uninstall_ca_certificate() {
-                        Ok(()) => tracing::info!("Cleanup: CA certificate removed on window close"),
-                        Err(e) => tracing::warn!("Cleanup: Failed to remove CA certificate: {}", e),
+                        Ok(()) => tracing::info!("[Cleanup] 窗口关闭时 CA 证书已移除"),
+                        Err(e) => tracing::warn!("[Cleanup] 窗口关闭时 CA 证书移除失败: {}", e),
                     }
                 }
 
@@ -83,9 +112,18 @@ pub fn run() {
                     let original = state.original_proxy_settings.blocking_lock();
                     if let Some(ref orig) = *original {
                         match engine_core::platform_integration::windows::restore_system_proxy(orig) {
-                            Ok(()) => tracing::info!("Cleanup: System proxy restored on window close"),
-                            Err(e) => tracing::warn!("Cleanup: Failed to restore system proxy: {}", e),
+                            Ok(()) => tracing::info!("[Cleanup] 窗口关闭时系统代理已恢复"),
+                            Err(e) => tracing::warn!("[Cleanup] 窗口关闭时系统代理恢复失败: {}", e),
                         }
+                    }
+                }
+
+                #[cfg(target_os = "windows")]
+                {
+                    use engine_core::proxy::transparent_proxy::wfp_engine;
+                    match wfp_engine::uninstall_redirect_filters() {
+                        Ok(()) => tracing::info!("[Cleanup] 窗口关闭时 WFP 过滤器已卸载"),
+                        Err(e) => tracing::warn!("[Cleanup] 窗口关闭时 WFP 过滤器卸载失败: {}", e),
                     }
                 }
             }
