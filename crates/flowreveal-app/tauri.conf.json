@@ -29,13 +29,25 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "HTTP/HTTPS traffic capture and analysis tool",
+    "longDescription": "FlowReveal is an advanced HTTP/HTTPS traffic capture and analysis tool for developers. It supports forward proxy, transparent proxy (WFP), and HTTPS MITM decryption.",
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true
+      }
+    }
   }
 }
