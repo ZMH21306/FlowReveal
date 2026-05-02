@@ -59,14 +59,12 @@ pub fn run() {
             commands::capture::stop_capture,
             commands::traffic::get_requests,
             commands::traffic::get_sessions,
+            commands::traffic::export_har,
+            commands::traffic::replay_request,
             commands::cert::install_cert,
             commands::cert::uninstall_cert,
             commands::cert::get_ca_cert_pem,
             commands::cert::get_ca_info,
-            commands::hook::list_running_processes,
-            commands::hook::inject_hook,
-            commands::hook::eject_hook,
-            commands::hook::get_injected_pids,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
