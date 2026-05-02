@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useStore } from "../../store";
+import { useStore, type StoreState } from "../../store";
 import { startCapture, stopCapture, exportHar } from "../../lib/tauri-bindings";
 import type { CaptureConfig, CaptureMode } from "../../types";
 
@@ -72,11 +72,19 @@ function ModeDropdown({
   );
 }
 
-export function Toolbar() {
-  const captureStatus = useStore((s) => s.captureStatus);
-  const clearRequests = useStore((s) => s.clearRequests);
-  const setCaptureStatus = useStore((s) => s.setCaptureStatus);
-  const totalSessions = useStore((s) => s.totalSessions);
+interface ToolbarProps {
+  onToggleRules: () => void;
+  showRules: boolean;
+  onToggleStats: () => void;
+  showStats: boolean;
+  onOpenTransformer: () => void;
+}
+
+export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, onOpenTransformer }: ToolbarProps) {
+  const captureStatus = useStore((s: StoreState) => s.captureStatus);
+  const clearRequests = useStore((s: StoreState) => s.clearRequests);
+  const setCaptureStatus = useStore((s: StoreState) => s.setCaptureStatus);
+  const totalSessions = useStore((s: StoreState) => s.totalSessions);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("DualProxy");
   const [captureHttps, setCaptureHttps] = useState(true);
   const [pending, setPending] = useState(false);
@@ -205,6 +213,38 @@ export function Toolbar() {
           {captureHttps && <span className="flex items-center gap-0.5" title="HTTPS 解密已启用" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>🔓 HTTPS</span>}
         </div>
       )}
+
+      <button
+        onClick={onToggleRules}
+        className={`px-3 py-[6px] rounded text-sm transition-colors cursor-pointer ${
+          showRules
+            ? "bg-[var(--color-accent)] text-white"
+            : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)]"
+        }`}
+        title="规则管理"
+      >
+        📋 规则
+      </button>
+
+      <button
+        onClick={onToggleStats}
+        className={`px-3 py-[6px] rounded text-sm transition-colors cursor-pointer ${
+          showStats
+            ? "bg-[var(--color-accent)] text-white"
+            : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)]"
+        }`}
+        title="性能统计"
+      >
+        📊 统计
+      </button>
+
+      <button
+        onClick={onOpenTransformer}
+        className="px-3 py-[6px] rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
+        title="数据转换器"
+      >
+        🔧 工具
+      </button>
 
       <div className="text-xs text-[var(--color-text-secondary)]">
         FlowReveal
