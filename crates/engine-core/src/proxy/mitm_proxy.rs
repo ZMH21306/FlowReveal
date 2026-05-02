@@ -11,39 +11,9 @@ use tokio::sync::mpsc;
 
 use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme, TlsInfo};
 use crate::mitm::{CaManager, MitmConfig, build_tls_client_config, build_tls_server_config, pem_to_der, private_key_pem_to_der};
+use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header};
 
 static MITM_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-fn extract_header(headers: &[(String, String)], name: &str) -> Option<String> {
-    headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case(name))
-        .map(|(_, v)| v.clone())
-}
-
-fn now_us() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as u64
-}
-
-fn parse_host_port(target: &str, default_port: u16) -> (String, u16) {
-    if let Some(bracket_end) = target.find(']') {
-        let host = target[..=bracket_end].to_string();
-        let port = target[bracket_end + 1..]
-            .strip_prefix(':')
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(default_port);
-        (host, port)
-    } else if let Some(colon_pos) = target.rfind(':') {
-        let host = target[..colon_pos].to_string();
-        let port = target[colon_pos + 1..].parse().unwrap_or(default_port);
-        (host, port)
-    } else {
-        (target.to_string(), default_port)
-    }
-}
 
 async fn read_request_from_tls(
     tls_stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
@@ -92,7 +62,7 @@ async fn read_request_from_tls(
         req_body_bytes.resize(to_read, 0u8);
         reader.read_exact(&mut req_body_bytes).await.ok();
         if content_length > max_body_size + 1 {
-            let mut discard = vec![0u8; 4096];
+            let mut discard = [0u8; 4096];
             let mut remaining = content_length - to_read;
             while remaining > 0 {
                 let chunk = remaining.min(4096);
@@ -124,13 +94,7 @@ pub async fn handle_mitm_connect(
     if mitm_config.should_bypass(&host) {
         tracing::info!("MITM: Bypassing host {} (in bypass list), falling back to tunnel", host);
         return handle_connect_fallback(
-            client_stream,
-            &host,
-            port,
-            request_target,
-            req_headers,
-            source_ip,
-            engine_tx,
+            client_stream, &host, port, request_target, req_headers, source_ip, engine_tx,
         ).await;
     }
 
@@ -138,34 +102,7 @@ pub async fn handle_mitm_connect(
     let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
     let timestamp = now_us();
 
-    let req_msg = HttpMessage {
-        id: session_id,
-        session_id,
-        direction: MessageDirection::Request,
-        protocol: HttpProtocol::HTTP1_1,
-        scheme: Scheme::Https,
-        method: Some("CONNECT".to_string()),
-        url: Some(format!("https://{}", request_target)),
-        status_code: None,
-        status_text: None,
-        headers: req_headers.to_vec(),
-        body: None,
-        body_size: 0,
-        body_truncated: false,
-        content_type: None,
-        process_name: None,
-        process_id: None,
-        process_path: None,
-        source_ip: Some(source_ip.to_string()),
-        dest_ip: Some(host.clone()),
-        source_port: None,
-        dest_port: Some(port),
-        timestamp,
-        duration_us: None,
-        cookies: vec![],
-        raw_tls_info: None,
-    };
-
+    let req_msg = build_connect_message(session_id, request_target, req_headers, source_ip, &host, port, timestamp);
     let _ = engine_tx.send(req_msg).await;
 
     let mut client = client_stream;
@@ -221,14 +158,7 @@ pub async fn handle_mitm_connect(
     let content_length: usize = extract_header(&raw_headers, "content-length")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let req_body_size = req_body_bytes.len();
-    let (req_body_captured, req_body_truncated) = if req_body_size > max_body_size {
-        (Some(req_body_bytes[..max_body_size].to_vec()), true)
-    } else if req_body_size > 0 {
-        (Some(req_body_bytes.clone()), false)
-    } else {
-        (None, false)
-    };
+    let (req_body_captured, req_body_truncated) = truncate_body(&req_body_bytes, max_body_size);
 
     let tls_info = TlsInfo {
         version: "TLS 1.3".to_string(),
@@ -319,8 +249,7 @@ pub async fn handle_mitm_connect(
         .uri(forward_uri);
 
     for (key, value) in &raw_headers {
-        let kl = key.to_lowercase();
-        if kl != "host" && kl != "connection" && kl != "proxy-connection" && kl != "proxy-authorization" && kl != "accept-encoding" {
+        if !is_hop_by_hop_header(key) && !key.eq_ignore_ascii_case("host") && !key.eq_ignore_ascii_case("accept-encoding") {
             forward_req_builder = forward_req_builder.header(key.as_str(), value.as_str());
         }
     }
@@ -355,13 +284,7 @@ pub async fn handle_mitm_connect(
         .map(|b| b.to_bytes().to_vec())
         .unwrap_or_default();
     let resp_body_size = resp_body_bytes.len();
-    let (resp_body_captured, resp_body_truncated) = if resp_body_size > max_body_size {
-        (Some(resp_body_bytes[..max_body_size].to_vec()), true)
-    } else if resp_body_size > 0 {
-        (Some(resp_body_bytes.clone()), false)
-    } else {
-        (None, false)
-    };
+    let (resp_body_captured, resp_body_truncated) = truncate_body(&resp_body_bytes, max_body_size);
 
     let resp_msg = HttpMessage {
         id: session_id + 101,
@@ -420,19 +343,16 @@ pub async fn handle_mitm_connect(
     Ok(())
 }
 
-async fn handle_connect_fallback(
-    mut client_stream: TcpStream,
-    host: &str,
-    port: u16,
+fn build_connect_message(
+    session_id: u64,
     request_target: &str,
     req_headers: &[(String, String)],
     source_ip: &str,
-    engine_tx: mpsc::Sender<HttpMessage>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let timestamp = now_us();
-
-    let req_msg = HttpMessage {
+    host: &str,
+    port: u16,
+    timestamp: u64,
+) -> HttpMessage {
+    HttpMessage {
         id: session_id,
         session_id,
         direction: MessageDirection::Request,
@@ -458,8 +378,22 @@ async fn handle_connect_fallback(
         duration_us: None,
         cookies: vec![],
         raw_tls_info: None,
-    };
+    }
+}
 
+async fn handle_connect_fallback(
+    mut client_stream: TcpStream,
+    host: &str,
+    port: u16,
+    request_target: &str,
+    req_headers: &[(String, String)],
+    source_ip: &str,
+    engine_tx: mpsc::Sender<HttpMessage>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let timestamp = now_us();
+
+    let req_msg = build_connect_message(session_id, request_target, req_headers, source_ip, host, port, timestamp);
     let _ = engine_tx.send(req_msg).await;
 
     let remote_stream = match TcpStream::connect((host, port)).await {
@@ -509,19 +443,12 @@ async fn handle_connect_fallback(
     let (mut cr, mut cw) = tokio::io::split(client_stream);
     let (mut rr, mut rw) = tokio::io::split(remote_stream);
 
-    let client_to_remote = tokio::io::copy(&mut cr, &mut rw);
-    let remote_to_client = tokio::io::copy(&mut rr, &mut cw);
-
     tokio::select! {
-        r = client_to_remote => {
-            if let Err(e) = r {
-                tracing::debug!("CONNECT fallback tunnel client->remote error: {}", e);
-            }
+        r = tokio::io::copy(&mut cr, &mut rw) => {
+            if let Err(e) = r { tracing::debug!("CONNECT fallback tunnel c->r error: {}", e); }
         }
-        r = remote_to_client => {
-            if let Err(e) = r {
-                tracing::debug!("CONNECT fallback tunnel remote->client error: {}", e);
-            }
+        r = tokio::io::copy(&mut rr, &mut cw) => {
+            if let Err(e) = r { tracing::debug!("CONNECT fallback tunnel r->c error: {}", e); }
         }
     }
 
