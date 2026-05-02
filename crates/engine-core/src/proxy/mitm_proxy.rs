@@ -92,13 +92,13 @@ pub async fn handle_mitm_connect(
     let (host, port) = parse_host_port(request_target, 443);
 
     if mitm_config.should_bypass(&host) {
-        tracing::info!("MITM: Bypassing host {} (in bypass list), falling back to tunnel", host);
+        tracing::info!("[MITM] 绕过主机 {} (在绕过列表中)，回退到隧道模式", host);
         return handle_connect_fallback(
             client_stream, &host, port, request_target, req_headers, source_ip, engine_tx,
         ).await;
     }
 
-    tracing::info!("MITM: Intercepting CONNECT to {}:{}", host, port);
+    tracing::info!("[MITM] 拦截 CONNECT 到 {}:{}", host, port);
     let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
     let timestamp = now_us();
 
@@ -111,7 +111,7 @@ pub async fn handle_mitm_connect(
     let host_cert = match ca_manager.get_or_generate_cert(&host).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!("Failed to generate cert for {}: {}", host, e);
+            tracing::error!("[MITM] 生成 {} 证书失败: {}", host, e);
             return Ok(());
         }
     };
@@ -122,7 +122,7 @@ pub async fn handle_mitm_connect(
     let server_config = match build_tls_server_config(cert_der, key_der) {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!("Failed to build TLS server config for {}: {}", host, e);
+            tracing::error!("[MITM] 构建 {} TLS 服务端配置失败: {}", host, e);
             return Ok(());
         }
     };
@@ -131,18 +131,18 @@ pub async fn handle_mitm_connect(
     let tls_client = match tls_acceptor.accept(client).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::debug!("TLS handshake with client failed for {}: {}", host, e);
+            tracing::debug!("[MITM] 与客户端的 TLS 握手失败 {}: {}", host, e);
             return Ok(());
         }
     };
 
-    tracing::debug!("MITM: TLS handshake with client completed for {}", host);
+    tracing::debug!("[MITM] 与客户端的 TLS 握手完成 {}", host);
 
     let (mut tls_client, method, request_target, raw_headers, req_body_bytes) =
         match read_request_from_tls(tls_client, max_body_size).await {
             Ok(result) => result,
             Err(e) => {
-                tracing::debug!("MITM: Failed to read request from {}: {}", host, e);
+                tracing::debug!("[MITM] 读取 {} 请求失败: {}", host, e);
                 return Ok(());
             }
         };
@@ -209,7 +209,7 @@ pub async fn handle_mitm_connect(
     let remote_tcp = match TcpStream::connect((forward_host.as_str(), forward_port)).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("MITM upstream connect failed for {}: {}", host, e);
+            tracing::warn!("[MITM] 上游连接 {} 失败: {}", host, e);
             let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
@@ -221,7 +221,7 @@ pub async fn handle_mitm_connect(
     let tls_remote2 = match connector2.connect(server_name2, remote_tcp).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("MITM upstream TLS handshake failed for {}: {}", host, e);
+            tracing::warn!("[MITM] 上游 TLS 握手 {} 失败: {}", host, e);
             let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
@@ -232,7 +232,7 @@ pub async fn handle_mitm_connect(
     let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::warn!("MITM upstream handshake failed for {}: {}", host, e);
+            tracing::warn!("[MITM] 上游 HTTP 握手 {} 失败: {}", host, e);
             let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
@@ -240,7 +240,7 @@ pub async fn handle_mitm_connect(
 
     tokio::spawn(async move {
         if let Err(e) = conn.await {
-            tracing::debug!("MITM upstream connection error: {}", e);
+            tracing::debug!("[MITM] 上游连接错误: {}", e);
         }
     });
 
@@ -262,7 +262,7 @@ pub async fn handle_mitm_connect(
     let upstream_resp = match sender.send_request(forward_req).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("MITM forward request failed for {}: {}", host, e);
+            tracing::warn!("[MITM] 转发请求 {} 失败: {}", host, e);
             let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
@@ -339,7 +339,7 @@ pub async fn handle_mitm_connect(
     tls_client.flush().await.ok();
     tokio::time::timeout(std::time::Duration::from_secs(2), tls_client.shutdown()).await.ok();
 
-    tracing::info!("MITM: Completed HTTPS interception for {} (status={})", host, status_code);
+    tracing::info!("[MITM] ✓ HTTPS 拦截完成 {} (status={})", host, status_code);
     Ok(())
 }
 
@@ -399,7 +399,7 @@ async fn handle_connect_fallback(
     let remote_stream = match TcpStream::connect((host, port)).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("CONNECT fallback: Failed to connect to {}:{} - {}", host, port, e);
+            tracing::warn!("[MITM] CONNECT 回退: 连接 {}:{} 失败 - {}", host, port, e);
             let _ = client_stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
             return Ok(());
         }
@@ -445,10 +445,10 @@ async fn handle_connect_fallback(
 
     tokio::select! {
         r = tokio::io::copy(&mut cr, &mut rw) => {
-            if let Err(e) = r { tracing::debug!("CONNECT fallback tunnel c->r error: {}", e); }
+            if let Err(e) = r { tracing::debug!("[MITM] 回退隧道 c->r 错误: {}", e); }
         }
         r = tokio::io::copy(&mut rr, &mut cw) => {
-            if let Err(e) = r { tracing::debug!("CONNECT fallback tunnel r->c error: {}", e); }
+            if let Err(e) = r { tracing::debug!("[MITM] 回退隧道 r->c 错误: {}", e); }
         }
     }
 
