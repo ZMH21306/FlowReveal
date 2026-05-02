@@ -94,6 +94,18 @@ pub fn run() {
             commands::cert::uninstall_cert,
             commands::cert::get_ca_cert_pem,
             commands::cert::get_ca_info,
+            commands::rules::add_rule,
+            commands::rules::remove_rule,
+            commands::rules::toggle_rule,
+            commands::rules::update_rule,
+            commands::rules::get_rules,
+            commands::rules::enable_preset_rule,
+            commands::rules::export_rules,
+            commands::rules::import_rules,
+            commands::rules::clear_rules,
+            commands::analysis::search_traffic,
+            commands::analysis::filter_traffic_dsl,
+            commands::analysis::get_traffic_stats,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
