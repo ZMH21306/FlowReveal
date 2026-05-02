@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "FlowReveal — HTTP Debugger",
+        "title": "FlowReveal — HTTP 抓包调试工具",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
@@ -38,8 +38,8 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "HTTP/HTTPS traffic capture and analysis tool",
-    "longDescription": "FlowReveal is an advanced HTTP/HTTPS traffic capture and analysis tool for developers. It supports forward proxy, transparent proxy (WFP), and HTTPS MITM decryption.",
+    "shortDescription": "HTTP/HTTPS 抓包分析工具",
+    "longDescription": "FlowReveal 是一款高级 HTTP/HTTPS 流量抓包分析工具，面向开发者设计。支持正向代理、透明代理（WFP）和 HTTPS MITM 解密。",
     "windows": {
       "digestAlgorithm": "sha256",
       "timestampUrl": "http://timestamp.digicert.com",
