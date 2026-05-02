@@ -79,9 +79,12 @@ struct PidMap {
     entries: Vec<PidMapEntry>,
 }
 
+#[allow(dead_code)]
 struct PidMapEntry {
     source_port: u16,
+    #[allow(dead_code)]
     dest_ip: String,
+    #[allow(dead_code)]
     dest_port: u16,
     pid: u32,
     process_name: String,
@@ -99,6 +102,7 @@ impl PidMap {
             .map(|e| (e.pid, e.process_name.clone()))
     }
 
+    #[allow(dead_code)]
     fn insert(&mut self, source_port: u16, dest_ip: String, dest_port: u16, pid: u32, process_name: String) {
         self.entries.retain(|e| e.source_port != source_port);
         self.entries.push(PidMapEntry {
