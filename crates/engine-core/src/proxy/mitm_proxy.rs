@@ -5,7 +5,7 @@ use hyper::Request;
 use hyper_util::rt::TokioIo;
 use http_body_util::{BodyExt, Full};
 use bytes::Bytes;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
@@ -45,26 +45,32 @@ fn parse_host_port(target: &str, default_port: u16) -> (String, u16) {
     }
 }
 
-async fn read_line<T: AsyncReadExt + Unpin>(stream: &mut T) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let mut line = Vec::new();
-    let mut byte = [0u8; 1];
-    loop {
-        let n = stream.read(&mut byte).await?;
-        if n == 0 {
-            break;
-        }
-        if byte[0] == b'\n' {
-            break;
-        }
-        line.push(byte[0]);
-    }
-    String::from_utf8(line).map_err(|e| e.into())
-}
+async fn read_request_from_tls(
+    tls_stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
+    max_body_size: usize,
+) -> Result<(tokio_rustls::server::TlsStream<tokio::net::TcpStream>, String, String, Vec<(String, String)>, Vec<u8>), Box<dyn std::error::Error + Send + Sync>> {
+    let (tls_read, tls_write) = tokio::io::split(tls_stream);
+    let mut reader = BufReader::new(tls_read);
 
-async fn read_headers<T: AsyncReadExt + Unpin>(stream: &mut T) -> Result<Vec<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut headers = Vec::new();
+    let mut first_line = String::new();
+    let n = reader.read_line(&mut first_line).await?;
+    if n == 0 {
+        return Err("Empty request".into());
+    }
+
+    let first_line = first_line.trim_end().to_string();
+    let parts: Vec<&str> = first_line.splitn(3, ' ').collect();
+    if parts.len() < 2 {
+        return Err(format!("Invalid request line: {}", first_line).into());
+    }
+
+    let method = parts[0].to_string();
+    let request_target = parts[1].to_string();
+
+    let mut raw_headers = Vec::new();
     loop {
-        let line = read_line(stream).await?;
+        let mut line = String::new();
+        reader.read_line(&mut line).await?;
         let line = line.trim_end().to_string();
         if line.is_empty() {
             break;
@@ -72,10 +78,35 @@ async fn read_headers<T: AsyncReadExt + Unpin>(stream: &mut T) -> Result<Vec<(St
         if let Some(colon_pos) = line.find(':') {
             let name = line[..colon_pos].trim().to_string();
             let value = line[colon_pos + 1..].trim().to_string();
-            headers.push((name, value));
+            raw_headers.push((name, value));
         }
     }
-    Ok(headers)
+
+    let content_length: usize = extract_header(&raw_headers, "content-length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    let mut req_body_bytes = Vec::new();
+    if content_length > 0 {
+        let to_read = content_length.min(max_body_size + 1);
+        req_body_bytes.resize(to_read, 0u8);
+        reader.read_exact(&mut req_body_bytes).await.ok();
+        if content_length > max_body_size + 1 {
+            let mut discard = vec![0u8; 4096];
+            let mut remaining = content_length - to_read;
+            while remaining > 0 {
+                let chunk = remaining.min(4096);
+                let n = reader.read(&mut discard[..chunk]).await.unwrap_or(0);
+                if n == 0 { break; }
+                remaining -= n;
+            }
+        }
+    }
+
+    let tls_read = reader.into_inner();
+    let tls_stream = tls_read.unsplit(tls_write);
+
+    Ok((tls_stream, method, request_target, raw_headers, req_body_bytes))
 }
 
 pub async fn handle_mitm_connect(
@@ -160,7 +191,7 @@ pub async fn handle_mitm_connect(
     };
 
     let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
-    let mut tls_client = match tls_acceptor.accept(client).await {
+    let tls_client = match tls_acceptor.accept(client).await {
         Ok(s) => s,
         Err(e) => {
             tracing::debug!("TLS handshake with client failed for {}: {}", host, e);
@@ -170,61 +201,26 @@ pub async fn handle_mitm_connect(
 
     tracing::debug!("MITM: TLS handshake with client completed for {}", host);
 
-    let first_line = match read_line(&mut tls_client).await {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::debug!("MITM: Failed to read first line from {}: {}", host, e);
-            return Ok(());
-        }
-    };
-
-    let first_line = first_line.trim_end().to_string();
-    let parts: Vec<&str> = first_line.splitn(3, ' ').collect();
-    if parts.len() < 2 {
-        tracing::debug!("MITM: Invalid request line from {}: {}", host, first_line);
-        return Ok(());
-    }
-
-    let method = parts[0];
-    let request_target = parts[1];
-
-    let raw_headers = match read_headers(&mut tls_client).await {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::debug!("MITM: Failed to read headers from {}: {}", host, e);
-            return Ok(());
-        }
-    };
+    let (mut tls_client, method, request_target, raw_headers, req_body_bytes) =
+        match read_request_from_tls(tls_client, max_body_size).await {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::debug!("MITM: Failed to read request from {}: {}", host, e);
+                return Ok(());
+            }
+        };
 
     let req_host = extract_header(&raw_headers, "host").unwrap_or_else(|| host.clone());
     let forward_url = if request_target.starts_with("http://") || request_target.starts_with("https://") {
-        request_target.to_string()
+        request_target.clone()
     } else {
         format!("https://{}{}", req_host, request_target)
     };
 
+    let req_content_type = extract_header(&raw_headers, "content-type");
     let content_length: usize = extract_header(&raw_headers, "content-length")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-
-    let mut req_body_bytes = Vec::new();
-    if content_length > 0 {
-        let to_read = content_length.min(max_body_size + 1);
-        req_body_bytes.resize(to_read, 0u8);
-        tls_client.read_exact(&mut req_body_bytes).await.ok();
-        if content_length > max_body_size + 1 {
-            let mut discard = vec![0u8; 4096];
-            let mut remaining = content_length - to_read;
-            while remaining > 0 {
-                let chunk = remaining.min(4096);
-                let n = tls_client.read(&mut discard[..chunk]).await.unwrap_or(0);
-                if n == 0 { break; }
-                remaining -= n;
-            }
-        }
-    }
-
-    let req_content_type = extract_header(&raw_headers, "content-type");
     let req_body_size = req_body_bytes.len();
     let (req_body_captured, req_body_truncated) = if req_body_size > max_body_size {
         (Some(req_body_bytes[..max_body_size].to_vec()), true)
@@ -247,7 +243,7 @@ pub async fn handle_mitm_connect(
         direction: MessageDirection::Request,
         protocol: HttpProtocol::HTTP1_1,
         scheme: Scheme::Https,
-        method: Some(method.to_string()),
+        method: Some(method.clone()),
         url: Some(forward_url.clone()),
         status_code: None,
         status_text: None,
@@ -284,8 +280,7 @@ pub async fn handle_mitm_connect(
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("MITM upstream connect failed for {}: {}", host, e);
-            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
-            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
     };
@@ -297,8 +292,7 @@ pub async fn handle_mitm_connect(
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("MITM upstream TLS handshake failed for {}: {}", host, e);
-            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
-            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
     };
@@ -309,8 +303,7 @@ pub async fn handle_mitm_connect(
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("MITM upstream handshake failed for {}: {}", host, e);
-            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
-            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
     };
@@ -322,7 +315,7 @@ pub async fn handle_mitm_connect(
     });
 
     let mut forward_req_builder = Request::builder()
-        .method(method)
+        .method(method.as_str())
         .uri(forward_uri);
 
     for (key, value) in &raw_headers {
@@ -341,8 +334,7 @@ pub async fn handle_mitm_connect(
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("MITM forward request failed for {}: {}", host, e);
-            let err_resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
-            let _ = tls_client.write_all(err_resp.as_bytes()).await;
+            let _ = tls_client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await;
             return Ok(());
         }
     };
