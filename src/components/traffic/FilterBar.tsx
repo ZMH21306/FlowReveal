@@ -35,24 +35,24 @@ export function FilterBar() {
   const hasFilter = filter.searchText || filter.method !== "ALL" || filter.scheme !== "ALL" || filter.status !== "ALL";
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
-      <div className="relative flex-1 max-w-xs">
+    <div className="flex items-center gap-2 px-4 py-[6px] bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
+      <div className="relative flex-1 max-w-[260px]">
+        <svg className="absolute left-[10px] top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--color-text-secondary)] pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
         <input
           type="text"
           value={filter.searchText}
           onChange={(e) => setFilter({ searchText: e.target.value })}
-          placeholder="按 URL、主机、方法筛选..."
-          className="w-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-3 py-1.5 pl-7 rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none placeholder:text-[var(--color-text-secondary)]"
+          placeholder="搜索 URL、主机、方法..."
+          className="w-full bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs pl-8 pr-3 py-[5px] rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none placeholder:text-[var(--color-text-secondary)]"
         />
-        <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
       </div>
 
       <select
         value={filter.method}
         onChange={(e) => setFilter({ method: e.target.value as FilterMethod })}
-        className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none cursor-pointer"
+        className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-[5px] rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none cursor-pointer min-w-[70px]"
       >
         {METHODS.map((m) => (
           <option key={m.value} value={m.value}>{m.label}</option>
@@ -62,7 +62,7 @@ export function FilterBar() {
       <select
         value={filter.scheme}
         onChange={(e) => setFilter({ scheme: e.target.value as FilterScheme })}
-        className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none cursor-pointer"
+        className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-[5px] rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none cursor-pointer min-w-[70px]"
       >
         {SCHEMES.map((s) => (
           <option key={s.value} value={s.value}>{s.label}</option>
@@ -72,7 +72,7 @@ export function FilterBar() {
       <select
         value={filter.status}
         onChange={(e) => setFilter({ status: e.target.value as FilterStatus })}
-        className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none cursor-pointer"
+        className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-[5px] rounded border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:outline-none cursor-pointer min-w-[110px]"
       >
         {STATUSES.map((s) => (
           <option key={s.value} value={s.value}>{s.label}</option>
@@ -82,7 +82,7 @@ export function FilterBar() {
       {hasFilter && (
         <button
           onClick={resetFilter}
-          className="text-xs text-[var(--color-accent)] hover:underline"
+          className="text-xs px-2 py-[5px] rounded text-[var(--color-accent)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
         >
           重置
         </button>
