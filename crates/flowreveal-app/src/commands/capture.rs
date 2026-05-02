@@ -49,7 +49,7 @@ pub async fn start_capture(
 
     if should_start_forward {
         tracing::info!("[Capture] 正在启动正向代理 (端口={})...", forward_port);
-        match ForwardProxy::start(forward_port, &config, tx.clone()).await {
+        match ForwardProxy::start(forward_port, &config, tx.clone(), state.rule_engine.clone()).await {
             Ok(handle) => {
                 tracing::info!("[Capture] ✓ 正向代理启动成功 (端口={})", forward_port);
                 forward_shutdown_handle = Some(handle.shutdown_tx);
