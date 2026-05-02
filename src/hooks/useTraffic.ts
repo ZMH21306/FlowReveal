@@ -1,10 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import type { HttpMessage } from "../types";
-import { useStore } from "../store";
+import { useStore, type StoreState } from "../store";
 
 export function useTraffic() {
-  const processMessage = useStore((s) => s.processMessage);
+  const processMessage = useStore((s: StoreState) => s.processMessage);
   const processMessageRef = useRef(processMessage);
   processMessageRef.current = processMessage;
 
