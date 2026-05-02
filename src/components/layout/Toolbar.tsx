@@ -4,8 +4,8 @@ import { startCapture, stopCapture, exportHar } from "../../lib/tauri-bindings";
 import type { CaptureConfig, CaptureMode } from "../../types";
 
 const CAPTURE_MODES: { value: CaptureMode; label: string; desc: string }[] = [
-  { value: "ForwardProxy", label: "Forward Proxy", desc: "Auto proxy + MITM" },
-  { value: "TransparentProxy", label: "Transparent", desc: "WFP transparent proxy (requires admin)" },
+  { value: "ForwardProxy", label: "正向代理", desc: "自动代理 + MITM 解密" },
+  { value: "TransparentProxy", label: "透明代理", desc: "WFP 透明代理（需管理员权限）" },
 ];
 
 function ModeDropdown({
@@ -130,7 +130,7 @@ export function Toolbar() {
             : "bg-[var(--color-success)] hover:bg-green-600 text-white"
         }`}
       >
-        {pending ? "..." : isRunning ? "■ Stop" : "▶ Start"}
+        {pending ? "..." : isRunning ? "■ 停止" : "▶ 开始"}
       </button>
 
       <ModeDropdown
@@ -147,14 +147,14 @@ export function Toolbar() {
           disabled={isRunning || pending}
           className="w-3.5 h-3.5 rounded border-[var(--color-border)] accent-[var(--color-accent)]"
         />
-        <span className="text-xs text-[var(--color-text-secondary)]">HTTPS</span>
+        <span className="text-xs text-[var(--color-text-secondary)]">HTTPS 解密</span>
       </label>
 
       <button
         onClick={clearRequests}
         className="px-3 py-1.5 rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors"
       >
-        Clear
+        清空
       </button>
 
       <button
@@ -173,9 +173,9 @@ export function Toolbar() {
           }
         }}
         className="px-3 py-1.5 rounded text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors"
-        title="Export all sessions as HAR"
+        title="导出所有会话为 HAR 文件"
       >
-        ↓ Export
+        ↓ 导出
       </button>
 
       {errorMsg && (
@@ -189,7 +189,7 @@ export function Toolbar() {
       {isRunning && (
         <div className="text-xs text-[var(--color-accent)] font-mono flex items-center gap-1">
           <span>{currentMode.label} · :40960</span>
-          {captureHttps && <span title="HTTPS decryption enabled (auto proxy + auto cert)">🔒HTTPS</span>}
+          {captureHttps && <span title="HTTPS 解密已启用（自动代理 + 自动证书）">🔒HTTPS</span>}
         </div>
       )}
 
