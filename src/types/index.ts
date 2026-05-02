@@ -1,7 +1,7 @@
 export type MessageDirection = "Request" | "Response";
 export type HttpProtocol = "HTTP1_1" | "HTTP2" | "WebSocket";
 export type Scheme = "Http" | "Https";
-export type CaptureMode = "ForwardProxy" | "TransparentProxy" | "ApiHook";
+export type CaptureMode = "ForwardProxy" | "TransparentProxy" | "DualProxy" | "ApiHook";
 export type CaptureStatus = "Idle" | "Running" | "Error";
 export type WsOpcode = "Continuation" | "Text" | "Binary" | "Close" | "Ping" | "Pong";
 export type TransportProtocol = "Tcp" | "Udp";
@@ -88,6 +88,7 @@ export interface CaptureConfig {
   ca_key_path: string | null;
   mitm_bypass_hosts: string[];
   proxy_port: number;
+  transparent_proxy_port: number;
 }
 
 export interface CaptureFilter {
