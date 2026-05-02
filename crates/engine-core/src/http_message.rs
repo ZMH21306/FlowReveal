@@ -84,6 +84,7 @@ pub struct HttpMessage {
     pub duration_us: Option<u64>,
     pub cookies: Vec<Cookie>,
     pub raw_tls_info: Option<TlsInfo>,
+    pub stream_id: Option<u32>,
 }
 
 impl HttpMessage {
@@ -152,6 +153,7 @@ impl Default for HttpMessage {
             duration_us: None,
             cookies: vec![],
             raw_tls_info: None,
+            stream_id: None,
         }
     }
 }
