@@ -10,4 +10,3 @@ pub mod platform_integration;
 pub mod process_info;
 pub mod proxy;
 pub mod replay;
-pub mod storage;
