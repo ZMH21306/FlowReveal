@@ -8,13 +8,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function StatusBar() {
-  const stats = useStore((s) => s.stats);
+  const totalSessions = useStore((s) => s.totalSessions);
+  const activeSessions = useStore((s) => s.activeSessions);
+  const bytesCaptured = useStore((s) => s.bytesCaptured);
+  const decryptedCount = useStore((s) => s.decryptedCount);
   const captureStatus = useStore((s) => s.captureStatus);
-  const sessions = useStore((s) => s.sessions);
-
-  const httpsCount = Array.from(sessions.values()).filter(
-    (s) => s.request.scheme === "Https" && s.request.raw_tls_info != null
-  ).length;
 
   return (
     <div className="flex items-center gap-6 px-4 py-1.5 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
@@ -30,14 +28,14 @@ export function StatusBar() {
         />
         {STATUS_LABELS[captureStatus] ?? captureStatus}
       </span>
-      <span>会话: {stats.total_sessions}</span>
-      <span>活跃: {stats.active_sessions}</span>
-      {httpsCount > 0 && (
+      <span>会话: {totalSessions}</span>
+      <span>活跃: {activeSessions}</span>
+      {decryptedCount > 0 && (
         <span className="text-[var(--color-accent)]">
-          🔒 已解密: {httpsCount}
+          � 已解密: {decryptedCount}
         </span>
       )}
-      <span>数据量: {formatSize(stats.bytes_captured)}</span>
+      <span>数据量: {formatSize(bytesCaptured)}</span>
     </div>
   );
 }
