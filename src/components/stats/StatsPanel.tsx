@@ -21,6 +21,18 @@ interface TrafficStats {
 
 const COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#3b82f6", "#a855f7", "#ec4899", "#14b8a6", "#f97316", "#64748b"];
 
+const darkTooltipStyle: React.CSSProperties = {
+  backgroundColor: "var(--color-bg-tertiary)",
+  border: "1px solid var(--color-border)",
+  borderRadius: "6px",
+  color: "var(--color-text-primary)",
+  fontSize: 12,
+  padding: "8px 12px",
+  boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+};
+
+const darkTooltipCursor = { fill: "var(--color-bg-tertiary)", opacity: 0.5 };
+
 function formatBytes(b: number): string {
   if (b < 1024) return `${b}B`;
   if (b < 1048576) return `${(b / 1024).toFixed(1)}KB`;
@@ -103,14 +115,14 @@ export function StatsPanel({ onClose }: StatsPanelProps) {
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart><Pie data={methodData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}>
                   {methodData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Pie><Tooltip /></PieChart>
+                </Pie><Tooltip contentStyle={darkTooltipStyle} /><Legend wrapperStyle={{ color: "var(--color-text-secondary)", fontSize: 12 }} /></PieChart>
               </ResponsiveContainer>
             </div>
             {statusCodeData.length > 0 && (
               <div className="chart-section">
                 <h4>状态码分布</h4>
                 <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={statusCodeData}><XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><Tooltip /><Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} /></BarChart>
+                  <BarChart data={statusCodeData}><XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><Tooltip contentStyle={darkTooltipStyle} cursor={darkTooltipCursor} /><Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} /></BarChart>
                 </ResponsiveContainer>
               </div>
             )}
@@ -121,7 +133,7 @@ export function StatsPanel({ onClose }: StatsPanelProps) {
           <div className="chart-section">
             <h4>域名统计 Top 20</h4>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={stats.by_domain} layout="vertical"><XAxis type="number" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis dataKey="domain" type="category" width={140} tick={{ fontSize: 10, fill: "var(--color-text-primary)" }} /><Tooltip /><Bar dataKey="request_count" fill="#6366f1" name="请求数" radius={[0, 4, 4, 0]} /></BarChart>
+              <BarChart data={stats.by_domain} layout="vertical"><XAxis type="number" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis dataKey="domain" type="category" width={140} tick={{ fontSize: 10, fill: "var(--color-text-primary)" }} /><Tooltip contentStyle={darkTooltipStyle} cursor={darkTooltipCursor} /><Bar dataKey="request_count" fill="#6366f1" name="请求数" radius={[0, 4, 4, 0]} /></BarChart>
             </ResponsiveContainer>
           </div>
         )}
@@ -132,7 +144,7 @@ export function StatsPanel({ onClose }: StatsPanelProps) {
             <ResponsiveContainer width="100%" height={300}>
               <PieChart><Pie data={stats.by_content_type} dataKey="count" nameKey="content_type" cx="50%" cy="50%" outerRadius={100} label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}>
                 {stats.by_content_type.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie><Tooltip /><Legend /></PieChart>
+              </Pie><Tooltip contentStyle={darkTooltipStyle} /><Legend wrapperStyle={{ color: "var(--color-text-secondary)", fontSize: 12 }} /></PieChart>
             </ResponsiveContainer>
           </div>
         )}
@@ -141,7 +153,7 @@ export function StatsPanel({ onClose }: StatsPanelProps) {
           <div className="chart-section">
             <h4>耗时分布</h4>
             <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={stats.duration_distribution}><XAxis dataKey="range" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><Tooltip /><Bar dataKey="count" fill="#22c55e" name="请求数" radius={[4, 4, 0, 0]} /></BarChart>
+              <BarChart data={stats.duration_distribution}><XAxis dataKey="range" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><Tooltip contentStyle={darkTooltipStyle} cursor={darkTooltipCursor} /><Bar dataKey="count" fill="#22c55e" name="请求数" radius={[4, 4, 0, 0]} /></BarChart>
             </ResponsiveContainer>
           </div>
         )}
@@ -150,7 +162,7 @@ export function StatsPanel({ onClose }: StatsPanelProps) {
           <div className="chart-section">
             <h4>大小分布</h4>
             <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={stats.size_distribution}><XAxis dataKey="range" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><Tooltip /><Bar dataKey="count" fill="#f59e0b" name="请求数" radius={[4, 4, 0, 0]} /></BarChart>
+              <BarChart data={stats.size_distribution}><XAxis dataKey="range" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} /><Tooltip contentStyle={darkTooltipStyle} cursor={darkTooltipCursor} /><Bar dataKey="count" fill="#f59e0b" name="请求数" radius={[4, 4, 0, 0]} /></BarChart>
             </ResponsiveContainer>
           </div>
         )}
