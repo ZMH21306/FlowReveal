@@ -1,11 +1,11 @@
-import { useStore } from "../../store";
+import { useStore, type StoreState } from "../../store";
 import { methodColor, statusCodeColor, formatDuration, formatSize } from "../../lib/utils";
 
 export function TrafficList() {
-  const sessions = useStore((s) => s.sessions);
-  const filteredSessionList = useStore((s) => s.filteredSessionList);
-  const selectedId = useStore((s) => s.selectedId);
-  const selectRequest = useStore((s) => s.selectRequest);
+  const sessions = useStore((s: StoreState) => s.sessions);
+  const filteredSessionList = useStore((s: StoreState) => s.filteredSessionList);
+  const selectedId = useStore((s: StoreState) => s.selectedId);
+  const selectRequest = useStore((s: StoreState) => s.selectRequest);
 
   const getSession = (id: number) => sessions.get(id);
 
@@ -28,7 +28,7 @@ export function TrafficList() {
           </div>
         ) : (
           <div className="flex flex-col">
-            {filteredSessionList.map((sid) => {
+            {filteredSessionList.map((sid: number) => {
               const session = getSession(sid);
               if (!session) return null;
               const req = session.request;
