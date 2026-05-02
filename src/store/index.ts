@@ -27,6 +27,10 @@ export interface StoreState {
   filter: TrafficFilter;
   filteredSessionList: number[];
   bookmarks: Set<number>;
+  dslExpression: string | null;
+  dslFilteredIds: Set<number> | null;
+  pageSize: number;
+  currentPage: number;
 
   totalSessions: number;
   activeSessions: number;
@@ -39,8 +43,13 @@ export interface StoreState {
   setCaptureStatus: (status: string) => void;
   setFilter: (filter: Partial<TrafficFilter>) => void;
   resetFilter: () => void;
+  setDslFilter: (dsl: string, filteredIds: number[]) => void;
+  clearDslFilter: () => void;
   toggleBookmark: (id: number) => void;
   isBookmarked: (id: number) => boolean;
+  setPage: (page: number) => void;
+  setPageSize: (size: number) => void;
+  pagedSessionList: () => number[];
 }
 
 function matchesFilter(session: HttpSession, filter: TrafficFilter): boolean {
@@ -81,17 +90,24 @@ function matchesFilter(session: HttpSession, filter: TrafficFilter): boolean {
 function computeFiltered(
   sessionList: number[],
   sessions: Map<number, HttpSession>,
-  filter: TrafficFilter
+  filter: TrafficFilter,
+  dslFilteredIds: Set<number> | null
 ): number[] {
+  let result = sessionList;
+
+  if (dslFilteredIds != null) {
+    result = result.filter((id) => dslFilteredIds.has(id));
+  }
+
   if (
     filter.searchText === "" &&
     filter.method === "ALL" &&
     filter.scheme === "ALL" &&
     filter.status === "ALL"
   ) {
-    return sessionList;
+    return result;
   }
-  return sessionList.filter((id) => {
+  return result.filter((id) => {
     const session = sessions.get(id);
     return session ? matchesFilter(session, filter) : false;
   });
@@ -121,6 +137,10 @@ export const useStore = create<StoreState>((set) => ({
   filter: { ...DEFAULT_FILTER },
   filteredSessionList: [],
   bookmarks: new Set<number>(),
+  dslExpression: null,
+  dslFilteredIds: null,
+  pageSize: 500,
+  currentPage: 1,
   totalSessions: 0,
   activeSessions: 0,
   bytesCaptured: 0,
@@ -141,7 +161,7 @@ export const useStore = create<StoreState>((set) => ({
         };
         newSessions.set(msg.session_id, session);
         const newSessionList = [...state.sessionList, msg.session_id];
-        const newFiltered = computeFiltered(newSessionList, newSessions, state.filter);
+        const newFiltered = computeFiltered(newSessionList, newSessions, state.filter, state.dslFilteredIds);
         const stats = computeStats(newSessions);
         return {
           sessions: newSessions,
@@ -155,7 +175,7 @@ export const useStore = create<StoreState>((set) => ({
           const updated = { ...existing, response: msg };
           newSessions.set(msg.session_id, updated);
         }
-        const newFiltered = computeFiltered(state.sessionList, newSessions, state.filter);
+        const newFiltered = computeFiltered(state.sessionList, newSessions, state.filter, state.dslFilteredIds);
         const stats = computeStats(newSessions);
         return {
           sessions: newSessions,
@@ -172,6 +192,8 @@ export const useStore = create<StoreState>((set) => ({
       sessionList: [],
       selectedId: null,
       filteredSessionList: [],
+      dslExpression: null,
+      dslFilteredIds: null,
       totalSessions: 0,
       activeSessions: 0,
       bytesCaptured: 0,
@@ -182,14 +204,27 @@ export const useStore = create<StoreState>((set) => ({
   setFilter: (partial) =>
     set((state) => {
       const newFilter = { ...state.filter, ...partial };
-      const newFiltered = computeFiltered(state.sessionList, state.sessions, newFilter);
+      const newFiltered = computeFiltered(state.sessionList, state.sessions, newFilter, state.dslFilteredIds);
       return { filter: newFilter, filteredSessionList: newFiltered };
     }),
 
   resetFilter: () =>
     set((state) => {
-      const newFiltered = computeFiltered(state.sessionList, state.sessions, DEFAULT_FILTER);
-      return { filter: { ...DEFAULT_FILTER }, filteredSessionList: newFiltered };
+      const newFiltered = computeFiltered(state.sessionList, state.sessions, DEFAULT_FILTER, null);
+      return { filter: { ...DEFAULT_FILTER }, filteredSessionList: newFiltered, dslExpression: null, dslFilteredIds: null };
+    }),
+
+  setDslFilter: (dsl, filteredIds) =>
+    set((state) => {
+      const idSet = new Set(filteredIds);
+      const newFiltered = computeFiltered(state.sessionList, state.sessions, state.filter, idSet);
+      return { dslExpression: dsl, dslFilteredIds: idSet, filteredSessionList: newFiltered };
+    }),
+
+  clearDslFilter: () =>
+    set((state) => {
+      const newFiltered = computeFiltered(state.sessionList, state.sessions, state.filter, null);
+      return { dslExpression: null, dslFilteredIds: null, filteredSessionList: newFiltered };
     }),
 
   toggleBookmark: (id) =>
@@ -201,5 +236,15 @@ export const useStore = create<StoreState>((set) => ({
 
   isBookmarked: (id: number): boolean => {
     return useStore.getState().bookmarks.has(id);
+  },
+
+  setPage: (page) => set({ currentPage: page }),
+
+  setPageSize: (size) => set({ pageSize: size, currentPage: 1 }),
+
+  pagedSessionList: (): number[] => {
+    const state = useStore.getState();
+    const start = (state.currentPage - 1) * state.pageSize;
+    return state.filteredSessionList.slice(start, start + state.pageSize);
   },
 }));
