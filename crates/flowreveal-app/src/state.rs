@@ -6,13 +6,18 @@ use engine_core::engine_stats::{CaptureStatus, EngineStats};
 use engine_core::mitm::CaManager;
 use engine_core::platform_integration::windows::ProxySettings;
 
+pub struct ProxyHandles {
+    pub forward_shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    pub transparent_shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
 pub struct AppState {
     pub sessions: Arc<RwLock<Vec<HttpSession>>>,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub stats: Arc<RwLock<EngineStats>>,
     pub event_tx: Arc<Mutex<Option<mpsc::Sender<HttpMessage>>>>,
     pub config: Arc<RwLock<Option<CaptureConfig>>>,
-    pub shutdown_handle: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    pub proxy_handles: Arc<Mutex<ProxyHandles>>,
     pub ca_manager: Arc<RwLock<Option<CaManager>>>,
     pub original_proxy_settings: Arc<Mutex<Option<ProxySettings>>>,
     pub proxy_was_set: Arc<RwLock<bool>>,
@@ -27,7 +32,10 @@ impl AppState {
             stats: Arc::new(RwLock::new(EngineStats::default())),
             event_tx: Arc::new(Mutex::new(None)),
             config: Arc::new(RwLock::new(None)),
-            shutdown_handle: Arc::new(Mutex::new(None)),
+            proxy_handles: Arc::new(Mutex::new(ProxyHandles {
+                forward_shutdown: None,
+                transparent_shutdown: None,
+            })),
             ca_manager: Arc::new(RwLock::new(None)),
             original_proxy_settings: Arc::new(Mutex::new(None)),
             proxy_was_set: Arc::new(RwLock::new(false)),
