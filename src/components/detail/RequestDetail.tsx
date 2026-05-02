@@ -80,14 +80,14 @@ export function RequestDetail() {
           <div className="flex items-center gap-1">
             <button
               onClick={handleReplay}
-              className="px-2 py-1 text-[10px] bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded border border-[var(--color-border)] transition-colors"
+              className="px-2.5 py-[5px] text-xs bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] active:bg-[var(--color-bg-primary)] rounded border border-[var(--color-border)] transition-colors cursor-pointer"
               title="重放此请求"
             >
               ↻ 重放
             </button>
             <button
               onClick={handleExportHar}
-              className="px-2 py-1 text-[10px] bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded border border-[var(--color-border)] transition-colors"
+              className="px-2.5 py-[5px] text-xs bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] active:bg-[var(--color-bg-primary)] rounded border border-[var(--color-border)] transition-colors cursor-pointer"
               title="导出为 HAR 文件"
             >
               ↓ HAR
@@ -122,7 +122,7 @@ export function RequestDetail() {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-1.5 text-xs transition-colors ${
+            className={`px-4 py-[7px] text-xs transition-colors cursor-pointer ${
               activeTab === tab.key
                 ? "text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]"
                 : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
