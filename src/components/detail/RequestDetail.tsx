@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useStore, type StoreState } from "../../store";
 import { formatDuration } from "../../lib/utils";
 import { exportHar, replayRequest } from "../../lib/tauri-bindings";
@@ -7,15 +7,11 @@ import { BodyView } from "./BodyView";
 import { CookiesView } from "./CookiesView";
 import { TimingView } from "./TimingView";
 import { TlsInfoBadge } from "./TlsInfoBadge";
+import { WebSocketView } from "../traffic/WebSocketView";
+import { GraphQLView, isGraphQLRequest } from "./GraphQLView";
+import { GrpcView, isGrpcWebRequest } from "./GrpcView";
 
-type DetailTab = "headers" | "body" | "cookies" | "timing";
-
-const TABS: { key: DetailTab; label: string }[] = [
-  { key: "headers", label: "请求头" },
-  { key: "body", label: "请求体" },
-  { key: "cookies", label: "Cookie" },
-  { key: "timing", label: "耗时" },
-];
+type DetailTab = "headers" | "body" | "cookies" | "timing" | "websocket" | "graphql" | "grpc";
 
 export function RequestDetail() {
   const sessions = useStore((s: StoreState) => s.sessions);
@@ -24,6 +20,29 @@ export function RequestDetail() {
   const [replayStatus, setReplayStatus] = useState<string | null>(null);
 
   const session = selectedId !== null ? sessions.get(selectedId) : undefined;
+
+  const isWebSocket = session?.request.protocol === "WebSocket";
+  const isGraphQL = session ? isGraphQLRequest(session) : false;
+  const isGrpc = session ? isGrpcWebRequest(session) : false;
+
+  const tabs = useMemo(() => {
+    const base: { key: DetailTab; label: string }[] = [
+      { key: "headers", label: "请求头" },
+      { key: "body", label: "请求体" },
+      { key: "cookies", label: "Cookie" },
+      { key: "timing", label: "耗时" },
+    ];
+    if (isGraphQL) {
+      base.push({ key: "graphql", label: "GraphQL" });
+    }
+    if (isGrpc) {
+      base.push({ key: "grpc", label: "gRPC" });
+    }
+    if (isWebSocket) {
+      base.push({ key: "websocket", label: "WebSocket" });
+    }
+    return base;
+  }, [isWebSocket, isGraphQL, isGrpc]);
 
   if (!session) {
     return (
@@ -118,7 +137,7 @@ export function RequestDetail() {
       </div>
 
       <div className="flex border-b border-[var(--color-border)]">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -191,6 +210,18 @@ export function RequestDetail() {
 
         {activeTab === "timing" && (
           <TimingView req={req} resp={resp} />
+        )}
+
+        {activeTab === "websocket" && isWebSocket && (
+          <WebSocketView frames={[]} />
+        )}
+
+        {activeTab === "graphql" && isGraphQL && session && (
+          <GraphQLView session={session} />
+        )}
+
+        {activeTab === "grpc" && isGrpc && session && (
+          <GrpcView session={session} />
         )}
       </div>
     </div>
