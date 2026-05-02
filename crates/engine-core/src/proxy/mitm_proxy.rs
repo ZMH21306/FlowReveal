@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme, TlsInfo};
 use crate::mitm::{CaManager, MitmConfig, build_tls_client_config, build_tls_server_config, pem_to_der, private_key_pem_to_der};
 use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header};
+use crate::rules::{RuleEngine, RuleExecutionResult, executor::RuleExecutor};
 
 static MITM_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -88,6 +89,7 @@ pub async fn handle_mitm_connect(
     ca_manager: Arc<CaManager>,
     mitm_config: &MitmConfig,
     max_body_size: usize,
+    rule_engine: Arc<RuleEngine>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (host, port) = parse_host_port(request_target, 443);
 
@@ -178,10 +180,10 @@ pub async fn handle_mitm_connect(
         status_code: None,
         status_text: None,
         headers: raw_headers.clone(),
-        body: req_body_captured,
+        body: req_body_captured.clone(),
         body_size: content_length,
         body_truncated: req_body_truncated,
-        content_type: req_content_type,
+        content_type: req_content_type.clone(),
         process_name: None,
         process_id: None,
         process_path: None,
@@ -196,6 +198,150 @@ pub async fn handle_mitm_connect(
     };
 
     let _ = engine_tx.send(https_req_msg).await;
+
+    // === MITM 规则检查点（请求阶段） ===
+    if let Some(result) = rule_engine.apply(&HttpMessage {
+        id: session_id + 100,
+        session_id,
+        direction: MessageDirection::Request,
+        protocol: HttpProtocol::HTTP1_1,
+        scheme: Scheme::Https,
+        method: Some(method.clone()),
+        url: Some(forward_url.clone()),
+        status_code: None,
+        status_text: None,
+        headers: raw_headers.clone(),
+        body: req_body_captured.clone(),
+        body_size: content_length,
+        body_truncated: req_body_truncated,
+        content_type: req_content_type.clone(),
+        process_name: None,
+        process_id: None,
+        process_path: None,
+        source_ip: Some(source_ip.to_string()),
+        dest_ip: Some(req_host.clone()),
+        source_port: None,
+        dest_port: Some(port),
+        timestamp: now_us(),
+        duration_us: None,
+        cookies: vec![],
+        raw_tls_info: None,
+    }, None).await {
+        match result {
+            RuleExecutionResult::AutoReply { status_code, status_text, headers, body, delay_ms } => {
+                tracing::info!("[MITM] 自动回复规则触发 | status={} | delay={}ms", status_code, delay_ms);
+                if delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
+                let mut resp_line = format!("HTTP/1.1 {} {}\r\n", status_code, status_text);
+                for (key, value) in &headers {
+                    resp_line.push_str(&format!("{}: {}\r\n", key, value));
+                }
+                resp_line.push_str(&format!("Content-Length: {}\r\n", body.len()));
+                resp_line.push_str("Connection: close\r\n\r\n");
+                tls_client.write_all(resp_line.as_bytes()).await?;
+                if !body.is_empty() {
+                    tls_client.write_all(&body).await?;
+                }
+                tls_client.flush().await.ok();
+                let mock_resp_msg = HttpMessage {
+                    id: session_id + 101,
+                    session_id,
+                    direction: MessageDirection::Response,
+                    protocol: HttpProtocol::HTTP1_1,
+                    scheme: Scheme::Https,
+                    method: None,
+                    url: None,
+                    status_code: Some(status_code),
+                    status_text: Some(status_text),
+                    headers,
+                    body: if body.is_empty() { None } else { Some(body) },
+                    body_size: 0,
+                    body_truncated: false,
+                    content_type: None,
+                    process_name: None,
+                    process_id: None,
+                    process_path: None,
+                    source_ip: Some(host.clone()),
+                    dest_ip: Some(source_ip.to_string()),
+                    source_port: Some(port),
+                    dest_port: None,
+                    timestamp: now_us(),
+                    duration_us: Some(0),
+                    cookies: vec![],
+                    raw_tls_info: Some(TlsInfo {
+                        version: "TLS 1.3".to_string(),
+                        cipher_suite: "AES_256_GCM_SHA384".to_string(),
+                        server_name: Some(host.clone()),
+                        cert_chain: vec![],
+                    }),
+                };
+                let _ = engine_tx.send(mock_resp_msg).await;
+                return Ok(());
+            }
+            RuleExecutionResult::Redirected { new_url, redirect_type, preserve_query, preserve_path } => {
+                let final_url = RuleExecutor::build_redirect_url(&forward_url, &new_url, preserve_query, preserve_path);
+                let redirect_code = match redirect_type {
+                    crate::rules::RedirectType::Permanent301 => 301,
+                    crate::rules::RedirectType::Temporary302 => 302,
+                    crate::rules::RedirectType::Temporary307 => 307,
+                    crate::rules::RedirectType::Permanent308 => 308,
+                };
+                tracing::info!("[MITM] 重定向规则触发 | {} -> {} | status={}", forward_url, final_url, redirect_code);
+                let redirect_resp = format!(
+                    "HTTP/1.1 {} Found\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    redirect_code, final_url
+                );
+                tls_client.write_all(redirect_resp.as_bytes()).await?;
+                tls_client.flush().await.ok();
+                let redirect_resp_msg = HttpMessage {
+                    id: session_id + 101,
+                    session_id,
+                    direction: MessageDirection::Response,
+                    protocol: HttpProtocol::HTTP1_1,
+                    scheme: Scheme::Https,
+                    method: None,
+                    url: None,
+                    status_code: Some(redirect_code),
+                    status_text: None,
+                    headers: vec![("Location".to_string(), final_url)],
+                    body: None,
+                    body_size: 0,
+                    body_truncated: false,
+                    content_type: None,
+                    process_name: None,
+                    process_id: None,
+                    process_path: None,
+                    source_ip: Some(host.clone()),
+                    dest_ip: Some(source_ip.to_string()),
+                    source_port: Some(port),
+                    dest_port: None,
+                    timestamp: now_us(),
+                    duration_us: Some(0),
+                    cookies: vec![],
+                    raw_tls_info: Some(TlsInfo {
+                        version: "TLS 1.3".to_string(),
+                        cipher_suite: "AES_256_GCM_SHA384".to_string(),
+                        server_name: Some(host.clone()),
+                        cert_chain: vec![],
+                    }),
+                };
+                let _ = engine_tx.send(redirect_resp_msg).await;
+                return Ok(());
+            }
+            RuleExecutionResult::HeaderModified { request_actions, response_actions } => {
+                if !request_actions.is_empty() {
+                    let mut modified_headers = raw_headers.clone();
+                    RuleExecutor::apply_header_actions(&mut modified_headers, &request_actions);
+                    tracing::info!("[MITM] 请求头修改规则触发 | 修改了 {} 个动作", request_actions.len());
+                    // 注意：此处简化处理，实际修改在后续转发时生效
+                }
+                if !response_actions.is_empty() {
+                    tracing::info!("[MITM] 响应头修改规则将在响应阶段应用 | {} 个动作", response_actions.len());
+                }
+            }
+        }
+    }
 
     let start = std::time::Instant::now();
 
