@@ -5,6 +5,7 @@ use engine_core::capture_config::CaptureConfig;
 use engine_core::engine_stats::{CaptureStatus, EngineStats};
 use engine_core::mitm::CaManager;
 use engine_core::platform_integration::windows::ProxySettings;
+use engine_core::rules::RuleEngine;
 
 pub struct ProxyHandles {
     pub forward_shutdown: Option<tokio::sync::oneshot::Sender<()>>,
@@ -22,6 +23,7 @@ pub struct AppState {
     pub original_proxy_settings: Arc<Mutex<Option<ProxySettings>>>,
     pub proxy_was_set: Arc<RwLock<bool>>,
     pub cert_was_installed: Arc<RwLock<bool>>,
+    pub rule_engine: Arc<RuleEngine>,
 }
 
 impl AppState {
@@ -40,6 +42,7 @@ impl AppState {
             original_proxy_settings: Arc::new(Mutex::new(None)),
             proxy_was_set: Arc::new(RwLock::new(false)),
             cert_was_installed: Arc::new(RwLock::new(false)),
+            rule_engine: Arc::new(RuleEngine::new()),
         }
     }
 }
