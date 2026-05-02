@@ -18,6 +18,7 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "time"] }
+tracing-appender = "0.2"
 dirs = "6"
 ctrlc = "3"
