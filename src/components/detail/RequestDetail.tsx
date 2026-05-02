@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore } from "../../store";
+import { useStore, type StoreState } from "../../store";
 import { formatDuration } from "../../lib/utils";
 import { exportHar, replayRequest } from "../../lib/tauri-bindings";
 import { HeadersTable } from "./HeadersTable";
@@ -18,8 +18,8 @@ const TABS: { key: DetailTab; label: string }[] = [
 ];
 
 export function RequestDetail() {
-  const sessions = useStore((s) => s.sessions);
-  const selectedId = useStore((s) => s.selectedId);
+  const sessions = useStore((s: StoreState) => s.sessions);
+  const selectedId = useStore((s: StoreState) => s.selectedId);
   const [activeTab, setActiveTab] = useState<DetailTab>("headers");
   const [replayStatus, setReplayStatus] = useState<string | null>(null);
 
