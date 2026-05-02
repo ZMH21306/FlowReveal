@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { useStore } from "../../store";
+import { useStore, type StoreState } from "../../store";
 import { invoke } from "@tauri-apps/api/core";
 
 const DSL_FIELDS = [
@@ -47,18 +47,18 @@ export function DslFilterBar() {
   const [saveName, setSaveName] = useState("");
   const [showSaveInput, setShowSaveInput] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const total = useStore((s: any) => s.sessionList.length);
-  const filtered = useStore((s: any) => s.filteredSessionList.length);
+  const total = useStore((s: StoreState) => s.sessionList.length);
+  const filtered = useStore((s: StoreState) => s.filteredSessionList.length);
 
   const applyDslFilter = useCallback(async (dsl: string) => {
     if (!dsl.trim()) {
-      useStore.getState().resetFilter();
+      useStore.getState().clearDslFilter();
       setParseError(null);
       return;
     }
     try {
-      await invoke<number[]>("filter_traffic_dsl", { dslExpression: dsl });
-      useStore.getState().setFilter({ searchText: `__dsl__${dsl}` } as any);
+      const filteredIds = await invoke<number[]>("filter_traffic_dsl", { dslExpression: dsl });
+      useStore.getState().setDslFilter(dsl, filteredIds);
       setParseError(null);
     } catch (e) {
       setParseError(String(e));
@@ -127,7 +127,7 @@ export function DslFilterBar() {
   const clearFilter = () => {
     setDslText("");
     setParseError(null);
-    useStore.getState().resetFilter();
+    useStore.getState().clearDslFilter();
   };
 
   const hasFilter = dslText.trim().length > 0;
