@@ -19,13 +19,14 @@ const DEFAULT_FILTER: TrafficFilter = {
   status: "ALL",
 };
 
-interface StoreState {
+export interface StoreState {
   sessions: Map<number, HttpSession>;
   sessionList: number[];
   selectedId: number | null;
   captureStatus: string;
   filter: TrafficFilter;
   filteredSessionList: number[];
+  bookmarks: Set<number>;
 
   totalSessions: number;
   activeSessions: number;
@@ -38,6 +39,8 @@ interface StoreState {
   setCaptureStatus: (status: string) => void;
   setFilter: (filter: Partial<TrafficFilter>) => void;
   resetFilter: () => void;
+  toggleBookmark: (id: number) => void;
+  isBookmarked: (id: number) => boolean;
 }
 
 function matchesFilter(session: HttpSession, filter: TrafficFilter): boolean {
@@ -117,6 +120,7 @@ export const useStore = create<StoreState>((set) => ({
   captureStatus: "Idle",
   filter: { ...DEFAULT_FILTER },
   filteredSessionList: [],
+  bookmarks: new Set<number>(),
   totalSessions: 0,
   activeSessions: 0,
   bytesCaptured: 0,
@@ -187,4 +191,15 @@ export const useStore = create<StoreState>((set) => ({
       const newFiltered = computeFiltered(state.sessionList, state.sessions, DEFAULT_FILTER);
       return { filter: { ...DEFAULT_FILTER }, filteredSessionList: newFiltered };
     }),
+
+  toggleBookmark: (id) =>
+    set((state) => {
+      const newBookmarks = new Set(state.bookmarks);
+      if (newBookmarks.has(id)) { newBookmarks.delete(id); } else { newBookmarks.add(id); }
+      return { bookmarks: newBookmarks };
+    }),
+
+  isBookmarked: (id: number): boolean => {
+    return useStore.getState().bookmarks.has(id);
+  },
 }));
