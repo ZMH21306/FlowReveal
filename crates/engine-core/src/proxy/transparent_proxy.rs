@@ -260,6 +260,7 @@ async fn handle_transparent_connection(
         duration_us: None,
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     };
 
     let _ = engine_tx.send(req_msg).await;
@@ -338,6 +339,7 @@ async fn handle_transparent_connection(
         duration_us: Some(duration_us),
         cookies: vec![],
         raw_tls_info: None,
+        stream_id: None,
     };
 
     let _ = engine_tx.send(resp_msg).await;
