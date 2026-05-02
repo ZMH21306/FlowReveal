@@ -1,4 +1,4 @@
-import { useStore, type FilterMethod, type FilterScheme, type FilterStatus } from "../../store";
+import { useStore, type StoreState, type FilterMethod, type FilterScheme, type FilterStatus } from "../../store";
 
 const METHODS: { value: FilterMethod; label: string }[] = [
   { value: "ALL", label: "全部" },
@@ -27,11 +27,11 @@ const STATUSES: { value: FilterStatus; label: string }[] = [
 ];
 
 export function FilterBar() {
-  const filter = useStore((s) => s.filter);
-  const setFilter = useStore((s) => s.setFilter);
-  const resetFilter = useStore((s) => s.resetFilter);
-  const total = useStore((s) => s.sessionList.length);
-  const filtered = useStore((s) => s.filteredSessionList.length);
+  const filter = useStore((s: StoreState) => s.filter);
+  const setFilter = useStore((s: StoreState) => s.setFilter);
+  const resetFilter = useStore((s: StoreState) => s.resetFilter);
+  const total = useStore((s: StoreState) => s.sessionList.length);
+  const filtered = useStore((s: StoreState) => s.filteredSessionList.length);
   const hasFilter = filter.searchText || filter.method !== "ALL" || filter.scheme !== "ALL" || filter.status !== "ALL";
 
   return (
