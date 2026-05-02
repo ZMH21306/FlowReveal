@@ -17,7 +17,6 @@ pub struct AppState {
     pub original_proxy_settings: Arc<Mutex<Option<ProxySettings>>>,
     pub proxy_was_set: Arc<RwLock<bool>>,
     pub cert_was_installed: Arc<RwLock<bool>>,
-    pub hook_injected_pids: Arc<Mutex<Vec<u32>>>,
 }
 
 impl AppState {
@@ -33,7 +32,6 @@ impl AppState {
             original_proxy_settings: Arc::new(Mutex::new(None)),
             proxy_was_set: Arc::new(RwLock::new(false)),
             cert_was_installed: Arc::new(RwLock::new(false)),
-            hook_injected_pids: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
