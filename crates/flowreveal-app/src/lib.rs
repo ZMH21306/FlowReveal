@@ -106,6 +106,9 @@ pub fn run() {
             commands::analysis::search_traffic,
             commands::analysis::filter_traffic_dsl,
             commands::analysis::get_traffic_stats,
+            commands::ai::ai_analyze_traffic,
+            commands::ai::ai_natural_language_query,
+            commands::vuln_scan::scan_vulnerabilities,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
