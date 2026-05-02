@@ -28,14 +28,24 @@ impl TransparentProxy {
         let max_body_size = config.max_body_size;
         let pid_map: Arc<Mutex<PidMap>> = Arc::new(Mutex::new(PidMap::new()));
 
-        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?;
-        tracing::info!("Transparent proxy listening on 127.0.0.1:{}", port);
+        tracing::info!("[TransparentProxy] 初始化中 | 端口={} | 最大Body={}", port, max_body_size);
+
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await.map_err(|e| {
+            tracing::error!("[TransparentProxy] ✗ 端口 {} 绑定失败: {}", port, e);
+            e
+        })?;
+        tracing::info!("[TransparentProxy] ✓ 监听已启动 127.0.0.1:{}", port);
 
         #[cfg(target_os = "windows")]
         {
             match wfp_engine::install_redirect_filters(port) {
-                Ok(()) => tracing::info!("WFP redirect filters installed successfully"),
-                Err(e) => tracing::error!("WFP filter installation failed: {} - transparent proxy may not intercept traffic", e),
+                Ok(()) => tracing::info!("[TransparentProxy] ✓ WFP 重定向过滤器安装成功"),
+                Err(e) => {
+                    tracing::warn!(
+                        "[TransparentProxy] ⚠ WFP 过滤器安装失败: {} - 请以管理员权限运行 FlowReveal 以启用透明代理自动拦截功能",
+                        e
+                    );
+                }
             }
         }
 
@@ -44,28 +54,33 @@ impl TransparentProxy {
         tokio::spawn(async move {
             let shutdown_rx = shutdown_rx;
             tokio::pin!(shutdown_rx);
+            let mut conn_count: u64 = 0;
             loop {
                 let accept_result = tokio::select! {
                     result = listener.accept() => result,
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Transparent proxy shutting down");
+                        tracing::info!("[TransparentProxy] 收到关闭信号，已处理 {} 个连接", conn_count);
                         return;
                     }
                 };
                 match accept_result {
                     Ok((stream, client_addr)) => {
+                        conn_count += 1;
+                        if conn_count <= 5 || conn_count % 50 == 0 {
+                            tracing::info!("[TransparentProxy] 新连接 #{} 来自 {}", conn_count, client_addr);
+                        }
                         let engine_tx = engine_tx.clone();
                         let pid_map = pid_map_clone.clone();
                         tokio::spawn(async move {
                             if let Err(e) =
                                 handle_transparent_connection(stream, client_addr, engine_tx, max_body_size, pid_map).await
                             {
-                                tracing::debug!("Transparent connection error from {}: {}", client_addr, e);
+                                tracing::debug!("[TransparentProxy] 连接处理错误 {}: {}", client_addr, e);
                             }
                         });
                     }
                     Err(e) => {
-                        tracing::error!("Transparent proxy accept error: {}", e);
+                        tracing::error!("[TransparentProxy] Accept 错误: {}", e);
                     }
                 }
             }
@@ -128,9 +143,12 @@ async fn handle_transparent_connection(
     let original_dest = get_original_destination(&stream).await;
 
     let (dest_ip, dest_port) = match original_dest {
-        Some(addr) => (addr.ip().to_string(), addr.port()),
+        Some(addr) => {
+            tracing::debug!("[TransparentProxy] 原始目标: {} | 客户端: {}", addr, client_addr);
+            (addr.ip().to_string(), addr.port())
+        }
         None => {
-            tracing::debug!("Could not determine original destination for {}", client_addr);
+            tracing::warn!("[TransparentProxy] 无法确定原始目标地址 for {}", client_addr);
             return Ok(());
         }
     };
@@ -251,7 +269,7 @@ async fn handle_transparent_connection(
     let upstream_stream = match tokio::net::TcpStream::connect((dest_ip.as_str(), dest_port)).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("Transparent proxy: Failed to connect to {}:{} - {}", dest_ip, dest_port, e);
+            tracing::warn!("[TransparentProxy] 连接 {}:{} 失败 - {}", dest_ip, dest_port, e);
             let mut client_stream = reader.into_inner();
             let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\nFailed to connect: {}", e.to_string().len(), e);
             let _ = client_stream.write_all(resp.as_bytes()).await;
