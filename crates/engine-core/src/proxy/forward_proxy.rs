@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use hyper::Request;
@@ -15,10 +14,9 @@ use crate::engine_error::EngineError;
 use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme};
 use crate::mitm::{CaManager, MitmConfig};
 use crate::proxy::mitm_proxy;
-use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header};
+use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header, next_session_id};
 use crate::rules::{RuleEngine, RuleExecutionResult, executor::RuleExecutor};
 
-static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub struct ForwardProxyHandle {
     pub shutdown_tx: oneshot::Sender<()>,
@@ -158,7 +156,7 @@ async fn handle_raw_connection(
 
     let source_ip = client_addr.ip().to_string();
     let timestamp = now_us();
-    let session_id = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let session_id = next_session_id();
 
     if method.eq_ignore_ascii_case("CONNECT") {
         tracing::info!("[ForwardProxy] CONNECT 请求 | target={} | source={}", request_target, source_ip);
