@@ -299,3 +299,10 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
     tracing::info!("[Capture] ✓ 抓包已停止");
     Ok(())
 }
+
+#[command]
+pub fn reset_session_counter() -> Result<(), String> {
+    engine_core::proxy::utils::reset_session_counter();
+    tracing::info!("[Capture] ✓ Session 计数器已重置");
+    Ok(())
+}
