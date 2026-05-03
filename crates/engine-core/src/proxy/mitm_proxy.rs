@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use hyper::Request;
 use hyper_util::rt::TokioIo;
@@ -12,10 +11,8 @@ use tokio::sync::mpsc;
 use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme, TlsInfo};
 use crate::mitm::{CaManager, MitmConfig, build_tls_client_config, build_tls_server_config, pem_to_der, private_key_pem_to_der};
 use crate::protocol::websocket;
-use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header};
+use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header, next_session_id};
 use crate::rules::{RuleEngine, RuleExecutionResult, executor::RuleExecutor};
-
-static MITM_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 async fn read_request_from_tls(
     tls_stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
@@ -102,14 +99,44 @@ pub async fn handle_mitm_connect(
     }
 
     tracing::info!("[MITM] 拦截 CONNECT 到 {}:{}", host, port);
-    let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let connect_session_id = next_session_id();
     let timestamp = now_us();
 
-    let req_msg = build_connect_message(session_id, request_target, req_headers, source_ip, &host, port, timestamp);
+    let req_msg = build_connect_message(connect_session_id, request_target, req_headers, source_ip, &host, port, timestamp);
     let _ = engine_tx.send(req_msg).await;
 
     let mut client = client_stream;
     let _ = client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
+
+    let connect_resp_msg = HttpMessage {
+        id: connect_session_id + 1,
+        session_id: connect_session_id,
+        direction: MessageDirection::Response,
+        protocol: HttpProtocol::HTTP1_1,
+        scheme: Scheme::Https,
+        method: None,
+        url: None,
+        status_code: Some(200),
+        status_text: Some("Connection Established".to_string()),
+        headers: vec![],
+        body: None,
+        body_size: 0,
+        body_truncated: false,
+        content_type: None,
+        process_name: None,
+        process_id: None,
+        process_path: None,
+        source_ip: Some(host.clone()),
+        dest_ip: Some(source_ip.to_string()),
+        source_port: Some(port),
+        dest_port: None,
+        timestamp: now_us(),
+        duration_us: None,
+        cookies: vec![],
+        raw_tls_info: None,
+        stream_id: None,
+    };
+    let _ = engine_tx.send(connect_resp_msg).await;
 
     let host_cert = match ca_manager.get_or_generate_cert(&host).await {
         Ok(c) => c,
@@ -175,8 +202,8 @@ pub async fn handle_mitm_connect(
     let protocol = if is_ws_upgrade { HttpProtocol::WebSocket } else { HttpProtocol::HTTP1_1 };
 
     let https_req_msg = HttpMessage {
-        id: session_id + 100,
-        session_id,
+        id: connect_session_id + 2,
+        session_id: connect_session_id,
         direction: MessageDirection::Request,
         protocol,
         scheme: Scheme::Https,
@@ -210,7 +237,7 @@ pub async fn handle_mitm_connect(
         let _ = tls_client.write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n").await;
         let (ws_frame_tx, _) = mpsc::channel::<crate::http_message::WebSocketFrame>(1024);
         let ws_result = websocket::handle_websocket_proxy(
-            tls_client, host, port, source_ip.to_string(), session_id, engine_tx, ws_frame_tx, max_body_size,
+            tls_client, host, port, source_ip.to_string(), connect_session_id, engine_tx, ws_frame_tx, max_body_size,
         ).await;
         if let Err(e) = ws_result {
             tracing::warn!("[MITM] WebSocket 代理错误: {}", e);
@@ -220,8 +247,8 @@ pub async fn handle_mitm_connect(
 
     // === MITM 规则检查点（请求阶段） ===
     if let Some(result) = rule_engine.apply(&HttpMessage {
-        id: session_id + 100,
-        session_id,
+        id: connect_session_id + 2,
+        session_id: connect_session_id,
         direction: MessageDirection::Request,
         protocol: HttpProtocol::HTTP1_1,
         scheme: Scheme::Https,
@@ -265,8 +292,8 @@ pub async fn handle_mitm_connect(
                 }
                 tls_client.flush().await.ok();
                 let mock_resp_msg = HttpMessage {
-                    id: session_id + 101,
-                    session_id,
+                    id: connect_session_id + 3,
+                    session_id: connect_session_id,
                     direction: MessageDirection::Response,
                     protocol: HttpProtocol::HTTP1_1,
                     scheme: Scheme::Https,
@@ -316,8 +343,8 @@ pub async fn handle_mitm_connect(
                 tls_client.write_all(redirect_resp.as_bytes()).await?;
                 tls_client.flush().await.ok();
                 let redirect_resp_msg = HttpMessage {
-                    id: session_id + 101,
-                    session_id,
+                    id: connect_session_id + 3,
+                    session_id: connect_session_id,
                     direction: MessageDirection::Response,
                     protocol: HttpProtocol::HTTP1_1,
                     scheme: Scheme::Https,
@@ -454,8 +481,8 @@ pub async fn handle_mitm_connect(
     let (resp_body_captured, resp_body_truncated) = truncate_body(&resp_body_bytes, max_body_size);
 
     let resp_msg = HttpMessage {
-        id: session_id + 101,
-        session_id,
+        id: connect_session_id + 3,
+        session_id: connect_session_id,
         direction: MessageDirection::Response,
         protocol: HttpProtocol::HTTP1_1,
         scheme: Scheme::Https,
@@ -559,7 +586,7 @@ async fn handle_connect_fallback(
     source_ip: &str,
     engine_tx: mpsc::Sender<HttpMessage>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let session_id = MITM_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let session_id = next_session_id();
     let timestamp = now_us();
 
     let req_msg = build_connect_message(session_id, request_target, req_headers, source_ip, host, port, timestamp);
