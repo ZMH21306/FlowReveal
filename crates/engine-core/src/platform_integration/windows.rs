@@ -156,3 +156,213 @@ pub fn is_ca_certificate_installed() -> bool {
         Err(_) => false,
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub name: String,
+    pub path: Option<String>,
+}
+
+pub fn find_process_by_connection(local_addr: &str, local_port: u16) -> Option<ProcessInfo> {
+    if let Some(info) = find_process_by_ipv4(local_addr, local_port) {
+        return Some(info);
+    }
+    find_process_by_ipv6(local_addr, local_port)
+}
+
+fn find_process_by_ipv4(local_addr: &str, local_port: u16) -> Option<ProcessInfo> {
+    use windows::Win32::NetworkManagement::IpHelper::*;
+    use windows::Win32::Networking::WinSock::*;
+    use std::net::Ipv4Addr;
+
+    let local_ip: Ipv4Addr = match local_addr.parse() {
+        Ok(ip) => ip,
+        Err(_) => {
+            tracing::debug!("[ProcessLookup] IPv4解析失败: {}", local_addr);
+            return None;
+        }
+    };
+
+    let ip_native = u32::from_le_bytes(local_ip.octets());
+    let port_native = (local_port as u16).to_be() as u32;
+
+    tracing::info!("[ProcessLookup] IPv4查询目标 {}:{} | ip_native=0x{:08X} port_native=0x{:08X}", local_addr, local_port, ip_native, port_native);
+
+    unsafe {
+        let mut size: u32 = 0;
+        let _ = GetExtendedTcpTable(None, &mut size, false, AF_INET.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
+        if size == 0 {
+            tracing::warn!("[ProcessLookup] IPv4 TCP表大小为0");
+            return None;
+        }
+
+        let mut buffer = vec![0u8; size as usize];
+        let result = GetExtendedTcpTable(Some(buffer.as_mut_ptr() as *mut _), &mut size, false, AF_INET.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
+        if result != 0 {
+            tracing::warn!("[ProcessLookup] GetExtendedTcpTable(IPv4)失败: {}", result);
+            return None;
+        }
+
+        let table = buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
+        let num_entries = (*table).dwNumEntries;
+        let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_TCPROW_OWNER_PID;
+
+        tracing::info!("[ProcessLookup] IPv4 TCP表共{}条", num_entries);
+
+        let mut match_count = 0u32;
+        for i in 0..num_entries {
+            let row = &*rows_ptr.add(i as usize);
+
+            let row_ip = row.dwLocalAddr;
+            let row_port = row.dwLocalPort;
+            let row_pid = row.dwOwningPid;
+
+            if i < 10 {
+                let row_ip_le = u32::from_le_bytes(row_ip.to_ne_bytes());
+                let row_ip_str_le = format!("{}.{}.{}.{}",
+                    (row_ip_le >> 24) as u8,
+                    ((row_ip_le >> 16) & 0xFF) as u8,
+                    ((row_ip_le >> 8) & 0xFF) as u8,
+                    (row_ip_le & 0xFF) as u8,
+                );
+                let row_ip_str_raw = format!("{}.{}.{}.{}",
+                    (row_ip >> 24) as u8,
+                    ((row_ip >> 16) & 0xFF) as u8,
+                    ((row_ip >> 8) & 0xFF) as u8,
+                    (row_ip & 0xFF) as u8,
+                );
+                let row_port_val = (row_port >> 16) as u16;
+                let row_port_le = u32::from_le(row_port) >> 16;
+                tracing::info!("[ProcessLookup]   行[{}] ip_raw=0x{:08X}({}) ip_le=0x{:08X}({}) port_raw=0x{:08X}(>>16={}) port_le_shifted={} pid={}",
+                    i, row_ip, row_ip_str_raw, row_ip_le, row_ip_str_le, row_port, row_port_val, row_port_le, row_pid);
+            }
+
+            let ip_match = row_ip == ip_native;
+            let port_match = row_port == port_native;
+
+            if ip_match && port_match {
+                tracing::info!("[ProcessLookup] ✓ IPv4命中 PID={}", row_pid);
+                return get_process_info(row_pid);
+            }
+            if ip_match { match_count += 1; }
+        }
+
+        tracing::info!("[ProcessLookup] IPv4未命中 (ip匹配{}条但port无匹配)", match_count);
+    }
+    None
+}
+
+fn find_process_by_ipv6(local_addr: &str, local_port: u16) -> Option<ProcessInfo> {
+    use windows::Win32::NetworkManagement::IpHelper::*;
+    use windows::Win32::Networking::WinSock::*;
+    use std::net::Ipv6Addr;
+
+    let local_ip: Ipv6Addr = match local_addr.parse() {
+        Ok(ip) => ip,
+        Err(_) => {
+            tracing::debug!("[ProcessLookup] IPv6解析失败: {}", local_addr);
+            return None;
+        }
+    };
+
+    let port_native = (local_port as u16).to_be() as u32;
+    let ip_bytes = local_ip.octets();
+
+    tracing::info!("[ProcessLookup] IPv6查询目标 [{}]:{} | port_native=0x{:08X}", local_addr, local_port, port_native);
+
+    unsafe {
+        let mut size: u32 = 0;
+        let _ = GetExtendedTcpTable(None, &mut size, false, AF_INET6.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
+        if size == 0 {
+            tracing::info!("[ProcessLookup] IPv6 TCP表大小为0");
+            return None;
+        }
+
+        let mut buffer = vec![0u8; size as usize];
+        let result = GetExtendedTcpTable(Some(buffer.as_mut_ptr() as *mut _), &mut size, false, AF_INET6.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
+        if result != 0 {
+            tracing::warn!("[ProcessLookup] GetExtendedTcpTable(IPv6)失败: {}", result);
+            return None;
+        }
+
+        let table = buffer.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID;
+        let num_entries = (*table).dwNumEntries;
+        let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_TCP6ROW_OWNER_PID;
+
+        tracing::info!("[ProcessLookup] IPv6 TCP表共{}条", num_entries);
+
+        for i in 0..num_entries {
+            let row = &*rows_ptr.add(i as usize);
+            let row_addr = &row.ucLocalAddr;
+
+            let ip_match = row_addr[..] == ip_bytes;
+            let port_match = row.dwLocalPort == port_native;
+
+            if ip_match {
+                let row_port_val = (row.dwLocalPort >> 16) as u16;
+                tracing::info!("[ProcessLookup]   IPv6行[{}] ip匹配! port=0x{:08X}(解码={}) pid={} port_match={}",
+                    i, row.dwLocalPort, row_port_val, row.dwOwningPid, port_match);
+            }
+
+            if ip_match && port_match {
+                tracing::info!("[ProcessLookup] ✓ IPv6命中 PID={}", row.dwOwningPid);
+                return get_process_info(row.dwOwningPid);
+            }
+        }
+
+        tracing::info!("[ProcessLookup] IPv6未命中");
+    }
+    None
+}
+
+fn get_process_info(pid: u32) -> Option<ProcessInfo> {
+    use windows::Win32::System::Diagnostics::ToolHelp::*;
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
+        let mut entry = PROCESSENTRY32::default();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+
+        if Process32First(snapshot, &mut entry).is_ok() {
+            loop {
+                if entry.th32ProcessID == pid {
+                    let name_bytes: Vec<u8> = entry.szExeFile
+                        .iter()
+                        .take_while(|&&c| c != 0)
+                        .map(|&c| c as u8)
+                        .collect();
+                    let name = String::from_utf8_lossy(&name_bytes).to_string();
+                    let path = get_process_path(pid);
+                    return Some(ProcessInfo { pid, name, path });
+                }
+                if Process32Next(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn get_process_path(pid: u32) -> Option<String> {
+    use windows::Win32::System::Threading::*;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 512];
+        let mut size = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut size,
+        );
+        if ok.is_ok() && size > 0 {
+            Some(String::from_utf16_lossy(&buf[..size as usize]))
+        } else {
+            None
+        }
+    }
+}
