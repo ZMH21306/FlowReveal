@@ -5,7 +5,7 @@ import { ContextMenu } from "./ContextMenu";
 import { useVirtualScroll } from "../../hooks/useVirtualScroll";
 import type { HttpSession } from "../../types";
 
-const ROW_HEIGHT = 28;
+const ROW_HEIGHT = 30;
 
 export function TrafficList() {
   const sessions = useStore((s: StoreState) => s.sessions);
@@ -111,7 +111,7 @@ export function TrafficList() {
 
   return (
     <div className="flex flex-col h-full bg-[var(--color-bg-primary)]">
-      <div className="grid grid-cols-[28px_56px_72px_1fr_64px_72px_72px_96px] gap-0 px-3 py-1.5 text-[11px] text-[var(--color-text-secondary)] bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)] select-none shrink-0">
+      <div className="grid grid-cols-[30px_50px_64px_1fr_56px_64px_64px_80px] gap-0 px-4 py-2 text-[10px] font-semibold text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)] select-none shrink-0 uppercase tracking-wider">
         <span></span>
         <span>#</span>
         <span>方法</span>
@@ -124,8 +124,10 @@ export function TrafficList() {
 
       <div ref={containerRef} className="flex-1 overflow-y-auto" style={{ position: "relative" }}>
         {filteredSessionList.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-[var(--color-text-secondary)] text-sm">
-            暂无抓包数据，点击"开始"启动抓包
+          <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)]">
+            <span className="text-3xl mb-3 opacity-40">📡</span>
+            <p className="text-sm">暂无抓包数据</p>
+            <p className="text-xs mt-1 opacity-60">点击"▶ 开始"启动抓包</p>
           </div>
         ) : (
           <div style={{ height: totalHeight, position: "relative" }}>
@@ -150,16 +152,17 @@ export function TrafficList() {
                 const isH2 = protocol === "HTTP2";
                 const isWs = protocol === "WebSocket";
                 const streamId = req.stream_id;
+                const isSelected = selectedId === sid;
 
                 return (
                   <div
                     key={sid}
                     onClick={() => selectRequest(sid)}
                     onContextMenu={(e) => handleContextMenu(e, session)}
-                    className={`grid grid-cols-[28px_56px_72px_1fr_64px_72px_72px_96px] gap-0 px-3 text-[11px] cursor-pointer border-b border-[var(--color-border)] hover:bg-[var(--color-bg-tertiary)] transition-colors items-center ${
-                      selectedId === sid
-                        ? "bg-[var(--color-bg-tertiary)] border-l-2 border-l-[var(--color-accent)]"
-                        : ""
+                    className={`grid grid-cols-[30px_50px_64px_1fr_56px_64px_64px_80px] gap-0 px-4 text-[11px] cursor-pointer border-b border-[var(--color-border-subtle)] transition-all duration-100 items-center ${
+                      isSelected
+                        ? "bg-[var(--color-accent-muted)] border-l-[3px] border-l-[var(--color-accent)]"
+                        : "hover:bg-[var(--color-bg-tertiary)] border-l-[3px] border-l-transparent"
                     }`}
                     style={{ height: ROW_HEIGHT }}
                   >
@@ -169,41 +172,41 @@ export function TrafficList() {
                       title={isBookmarked ? "移除书签" : "添加书签"}
                     >
                       {isBookmarked ? (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--color-warning)" stroke="var(--color-warning)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="var(--color-warning)" stroke="var(--color-warning)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
                       ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2" className="opacity-40 hover:opacity-100"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
                       )}
                     </span>
-                    <span className="text-[var(--color-text-secondary)] whitespace-nowrap flex items-center gap-[2px]" title={streamId != null ? `Stream #${streamId}` : undefined}>
-                      {isH2 && <span className="text-[9px] font-bold text-[var(--color-accent)] leading-none">h2</span>}
-                      {isWs && <span className="text-[9px] font-bold text-[var(--color-success)] leading-none">WS</span>}
-                      {isDecrypted && !isH2 && !isWs && <span className="text-[10px] leading-none" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>🔓</span>}
-                      {!isDecrypted && isHttps && method === "CONNECT" && !isH2 && !isWs && <span className="text-[10px] leading-none" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>🔒</span>}
-                      <span className="font-mono">{sid}</span>
+                    <span className="text-[var(--color-text-muted)] whitespace-nowrap flex items-center gap-[3px]" title={streamId != null ? `Stream #${streamId}` : undefined}>
+                      {isH2 && <span className="text-[8px] font-bold text-[var(--color-accent)] leading-none px-0.5 rounded bg-[var(--color-accent-muted)]">h2</span>}
+                      {isWs && <span className="text-[8px] font-bold text-[var(--color-success)] leading-none px-0.5 rounded bg-[var(--color-success-muted)]">WS</span>}
+                      {isDecrypted && !isH2 && !isWs && <span className="text-[9px] leading-none" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>🔓</span>}
+                      {!isDecrypted && isHttps && method === "CONNECT" && !isH2 && !isWs && <span className="text-[9px] leading-none" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>🔒</span>}
+                      <span className="font-mono text-[var(--color-text-secondary)]">{index + 1}</span>
                     </span>
                     <span
                       style={{ color: methodColor(method) }}
-                      className="font-mono font-semibold whitespace-nowrap"
+                      className="font-mono font-bold whitespace-nowrap text-[11px]"
                     >
                       {method}
                     </span>
-                    <span className="truncate" title={url}>
+                    <span className="truncate text-[var(--color-text-primary)]" title={url}>
                       {url}
                     </span>
                     <span
                       style={{ color: statusCodeColor(statusCode ?? null) }}
-                      className="font-mono whitespace-nowrap"
+                      className="font-mono whitespace-nowrap font-medium"
                     >
-                      {statusCode ?? "..."}
+                      {statusCode ?? "—"}
                     </span>
-                    <span className="text-[var(--color-text-secondary)] whitespace-nowrap">
+                    <span className="text-[var(--color-text-muted)] whitespace-nowrap">
                       {formatSize(bodySize)}
                     </span>
-                    <span className="text-[var(--color-text-secondary)] whitespace-nowrap">
+                    <span className="text-[var(--color-text-muted)] whitespace-nowrap">
                       {formatDuration(duration ?? null)}
                     </span>
-                    <span className="text-[var(--color-text-secondary)] truncate">
-                      {process || "-"}
+                    <span className="text-[var(--color-text-muted)] truncate">
+                      {process || "—"}
                     </span>
                   </div>
                 );
@@ -214,39 +217,15 @@ export function TrafficList() {
       </div>
 
       {filteredSessionList.length > pageSize && (
-        <div className="flex items-center justify-between px-3 py-1 text-[11px] text-[var(--color-text-secondary)] bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] shrink-0">
+        <div className="flex items-center justify-between px-4 py-1.5 text-[11px] text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] shrink-0">
           <span>
-            共 {filteredSessionList.length} 条 | 第 {currentPage}/{totalPages} 页
+            共 <span className="text-[var(--color-text-primary)] font-medium">{filteredSessionList.length}</span> 条 · 第 <span className="text-[var(--color-text-primary)] font-medium">{currentPage}</span>/{totalPages} 页
           </span>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage(1)}
-              disabled={currentPage <= 1}
-              className="px-1.5 py-0.5 rounded bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              ⏮
-            </button>
-            <button
-              onClick={() => setPage(currentPage - 1)}
-              disabled={currentPage <= 1}
-              className="px-1.5 py-0.5 rounded bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              ◀
-            </button>
-            <button
-              onClick={() => setPage(currentPage + 1)}
-              disabled={currentPage >= totalPages}
-              className="px-1.5 py-0.5 rounded bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              ▶
-            </button>
-            <button
-              onClick={() => setPage(totalPages)}
-              disabled={currentPage >= totalPages}
-              className="px-1.5 py-0.5 rounded bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              ⏭
-            </button>
+            <button onClick={() => setPage(1)} disabled={currentPage <= 1} className="px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed transition-all text-[10px]">⏮</button>
+            <button onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1} className="px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed transition-all text-[10px]">◀</button>
+            <button onClick={() => setPage(currentPage + 1)} disabled={currentPage >= totalPages} className="px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed transition-all text-[10px]">▶</button>
+            <button onClick={() => setPage(totalPages)} disabled={currentPage >= totalPages} className="px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed transition-all text-[10px]">⏭</button>
           </div>
         </div>
       )}
