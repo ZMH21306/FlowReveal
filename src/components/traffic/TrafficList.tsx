@@ -143,8 +143,8 @@ export function TrafficList() {
                 const url = req.url || "-";
                 const statusCode = resp?.status_code;
                 const bodySize = (req.body_size || 0) + (resp?.body_size || 0);
-                const duration = resp?.duration_us;
-                const process = req.process_name || "";
+                const duration = resp?.duration_us ?? (resp ? (resp.timestamp - req.timestamp) : null);
+                const process = req.process_name || resp?.process_name || "";
                 const isDecrypted = req.raw_tls_info != null;
                 const isHttps = req.scheme === "Https" || req.url?.startsWith("https://");
                 const isBookmarked = bookmarks.has(sid);
