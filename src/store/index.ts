@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
 import type { HttpMessage, HttpSession } from "../types";
 
 export type FilterMethod = "ALL" | "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "CONNECT";
@@ -152,6 +153,18 @@ export const useStore = create<StoreState>((set) => ({
       const isRequest = msg.direction === "Request";
 
       if (isRequest) {
+        if (newSessions.has(msg.session_id)) {
+          const existing = newSessions.get(msg.session_id)!;
+          const updated = { ...existing, request: msg };
+          newSessions.set(msg.session_id, updated);
+          const newFiltered = computeFiltered(state.sessionList, newSessions, state.filter, state.dslFilteredIds);
+          const stats = computeStats(newSessions);
+          return {
+            sessions: newSessions,
+            filteredSessionList: newFiltered,
+            ...stats,
+          };
+        }
         const session: HttpSession = {
           id: msg.session_id,
           request: msg,
@@ -186,7 +199,8 @@ export const useStore = create<StoreState>((set) => ({
     }),
 
   selectRequest: (id) => set({ selectedId: id }),
-  clearRequests: () =>
+  clearRequests: async () => {
+    try { await invoke("reset_session_counter"); } catch { /* ignore */ }
     set({
       sessions: new Map(),
       sessionList: [],
@@ -198,7 +212,8 @@ export const useStore = create<StoreState>((set) => ({
       activeSessions: 0,
       bytesCaptured: 0,
       decryptedCount: 0,
-    }),
+    });
+  },
   setCaptureStatus: (status) => set({ captureStatus: status }),
 
   setFilter: (partial) =>
