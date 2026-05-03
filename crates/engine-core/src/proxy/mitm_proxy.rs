@@ -88,6 +88,7 @@ pub async fn handle_mitm_connect(
     mitm_config: &MitmConfig,
     max_body_size: usize,
     rule_engine: Arc<RuleEngine>,
+    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (host, port) = parse_host_port(request_target, 443);
 
@@ -102,7 +103,7 @@ pub async fn handle_mitm_connect(
     let connect_session_id = next_session_id();
     let timestamp = now_us();
 
-    let req_msg = build_connect_message(connect_session_id, request_target, req_headers, source_ip, &host, port, timestamp);
+    let req_msg = build_connect_message(connect_session_id, request_target, req_headers, source_ip, &host, port, timestamp, proc_info);
     let _ = engine_tx.send(req_msg).await;
 
     let mut client = client_stream;
@@ -216,9 +217,9 @@ pub async fn handle_mitm_connect(
         body_size: content_length,
         body_truncated: req_body_truncated,
         content_type: req_content_type.clone(),
-        process_name: None,
-        process_id: None,
-        process_path: None,
+        process_name: proc_info.map(|p| p.name.clone()),
+        process_id: proc_info.map(|p| p.pid),
+        process_path: proc_info.and_then(|p| p.path.clone()),
         source_ip: Some(source_ip.to_string()),
         dest_ip: Some(req_host.clone()),
         source_port: None,
@@ -261,9 +262,9 @@ pub async fn handle_mitm_connect(
         body_size: content_length,
         body_truncated: req_body_truncated,
         content_type: req_content_type.clone(),
-        process_name: None,
-        process_id: None,
-        process_path: None,
+        process_name: proc_info.map(|p| p.name.clone()),
+        process_id: proc_info.map(|p| p.pid),
+        process_path: proc_info.and_then(|p| p.path.clone()),
         source_ip: Some(source_ip.to_string()),
         dest_ip: Some(req_host.clone()),
         source_port: None,
@@ -546,6 +547,7 @@ fn build_connect_message(
     host: &str,
     port: u16,
     timestamp: u64,
+    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
 ) -> HttpMessage {
     HttpMessage {
         id: session_id,
@@ -562,9 +564,9 @@ fn build_connect_message(
         body_size: 0,
         body_truncated: false,
         content_type: None,
-        process_name: None,
-        process_id: None,
-        process_path: None,
+        process_name: proc_info.map(|p| p.name.clone()),
+        process_id: proc_info.map(|p| p.pid),
+        process_path: proc_info.and_then(|p| p.path.clone()),
         source_ip: Some(source_ip.to_string()),
         dest_ip: Some(host.to_string()),
         source_port: None,
@@ -589,7 +591,7 @@ async fn handle_connect_fallback(
     let session_id = next_session_id();
     let timestamp = now_us();
 
-    let req_msg = build_connect_message(session_id, request_target, req_headers, source_ip, host, port, timestamp);
+    let req_msg = build_connect_message(session_id, request_target, req_headers, source_ip, host, port, timestamp, None);
     let _ = engine_tx.send(req_msg).await;
 
     let remote_stream = match TcpStream::connect((host, port)).await {
