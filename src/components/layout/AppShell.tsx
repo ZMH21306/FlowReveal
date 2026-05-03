@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Toolbar } from "./Toolbar";
 import { StatusBar } from "./StatusBar";
 import { TrafficList } from "../traffic/TrafficList";
@@ -20,6 +20,35 @@ export function AppShell() {
   const [showDiff, setShowDiff] = useState(false);
   const [showVuln, setShowVuln] = useState(false);
   const [showPlugins, setShowPlugins] = useState(false);
+  const [leftWidth, setLeftWidth] = useState(50);
+
+  const handleDividerDrag = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = leftWidth;
+      const container = (e.target as HTMLElement).closest(".main-split") as HTMLElement;
+      if (!container) return;
+      const containerWidth = container.offsetWidth;
+
+      const onMouseMove = (ev: MouseEvent) => {
+        const delta = ev.clientX - startX;
+        const pct = startWidth + (delta / containerWidth) * 100;
+        setLeftWidth(Math.max(25, Math.min(75, pct)));
+      };
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [leftWidth]
+  );
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[var(--color-bg-primary)]">
@@ -35,10 +64,18 @@ export function AppShell() {
         onOpenPlugins={() => setShowPlugins(true)}
       />
       <DslFilterBar />
-      <div className="flex flex-1 overflow-hidden">
-        <div className={`border-r border-[var(--color-border)] overflow-hidden transition-all ${showRules ? "w-[calc(55%-380px)]" : "w-[55%]"}`}>
+      <div className="main-split flex flex-1 overflow-hidden">
+        <div
+          className="overflow-hidden flex flex-col"
+          style={{ width: `${leftWidth}%` }}
+        >
           <TrafficList />
         </div>
+        <div
+          className="w-[5px] shrink-0 cursor-col-resize bg-[var(--color-border-subtle)] hover:bg-[var(--color-accent)] transition-colors duration-150 active:bg-[var(--color-accent-hover)]"
+          onMouseDown={handleDividerDrag}
+          title="拖拽调整面板宽度"
+        />
         <div className="flex-1 overflow-hidden">
           <RequestDetail />
         </div>
