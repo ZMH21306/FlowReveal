@@ -155,8 +155,14 @@ async fn handle_raw_connection(
     let raw_headers = read_headers(&mut reader).await?;
 
     let source_ip = client_addr.ip().to_string();
+    let source_port = client_addr.port();
     let timestamp = now_us();
     let session_id = next_session_id();
+
+    let proc_info = crate::platform_integration::windows::find_process_by_connection(&source_ip, source_port);
+    if let Some(ref p) = proc_info {
+        tracing::debug!("[ForwardProxy] 进程信息: PID={} | name={} | port={}", p.pid, p.name, source_port);
+    }
 
     if method.eq_ignore_ascii_case("CONNECT") {
         tracing::info!("[ForwardProxy] CONNECT 请求 | target={} | source={}", request_target, source_ip);
@@ -164,20 +170,20 @@ async fn handle_raw_connection(
             let client_stream = reader.into_inner();
             mitm_proxy::handle_mitm_connect(
                 client_stream, request_target, &raw_headers, &source_ip,
-                engine_tx, ca.clone(), mitm_config, max_body_size, rule_engine,
+                engine_tx, ca.clone(), mitm_config, max_body_size, rule_engine, proc_info.as_ref(),
             ).await
         } else {
             tracing::debug!("[ForwardProxy] CONNECT 隧道模式（无 MITM）| target={}", request_target);
             handle_connect_tunnel(
                 reader, session_id, request_target, &raw_headers,
-                &source_ip, timestamp, engine_tx,
+                &source_ip, timestamp, engine_tx, proc_info.as_ref(),
             ).await
         }
     } else {
         tracing::info!("[ForwardProxy] HTTP 请求 | method={} | target={} | source={}", method, request_target, source_ip);
         handle_http_request(
             reader, session_id, method, request_target, raw_headers,
-            source_ip, timestamp, engine_tx, max_body_size, rule_engine,
+            source_ip, timestamp, engine_tx, max_body_size, rule_engine, proc_info.as_ref(),
         ).await
     }
 }
@@ -232,10 +238,11 @@ async fn handle_connect_tunnel(
     source_ip: &str,
     timestamp: u64,
     engine_tx: mpsc::Sender<HttpMessage>,
+    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (host, port) = parse_host_port(request_target, 443);
 
-    let req_msg = build_connect_request(session_id, request_target, req_headers, source_ip, &host, port, timestamp);
+    let req_msg = build_connect_request(session_id, request_target, req_headers, source_ip, &host, port, timestamp, proc_info);
     let _ = engine_tx.send(req_msg).await;
 
     let start = std::time::Instant::now();
@@ -287,6 +294,7 @@ async fn handle_http_request(
     engine_tx: mpsc::Sender<HttpMessage>,
     max_body_size: usize,
     rule_engine: Arc<RuleEngine>,
+    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let host = extract_header(&req_headers, "host").unwrap_or_else(|| "unknown".to_string());
     let forward_url = if request_target.starts_with("http://") || request_target.starts_with("https://") {
@@ -317,9 +325,9 @@ async fn handle_http_request(
         body_size: content_length,
         body_truncated: req_body_truncated,
         content_type: extract_header(&req_headers, "content-type"),
-        process_name: None,
-        process_id: None,
-        process_path: None,
+        process_name: proc_info.map(|p| p.name.clone()),
+        process_id: proc_info.map(|p| p.pid),
+        process_path: proc_info.and_then(|p| p.path.clone()),
         source_ip: Some(source_ip.clone()),
         dest_ip: Some(host.clone()),
         source_port: None,
@@ -579,6 +587,7 @@ fn build_connect_request(
     host: &str,
     port: u16,
     timestamp: u64,
+    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
 ) -> HttpMessage {
     HttpMessage {
         id: session_id,
@@ -595,9 +604,9 @@ fn build_connect_request(
         body_size: 0,
         body_truncated: false,
         content_type: None,
-        process_name: None,
-        process_id: None,
-        process_path: None,
+        process_name: proc_info.map(|p| p.name.clone()),
+        process_id: proc_info.map(|p| p.pid),
+        process_path: proc_info.and_then(|p| p.path.clone()),
         source_ip: Some(source_ip.to_string()),
         dest_ip: Some(host.to_string()),
         source_port: None,
