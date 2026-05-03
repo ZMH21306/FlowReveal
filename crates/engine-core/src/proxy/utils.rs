@@ -1,3 +1,15 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static GLOBAL_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn next_session_id() -> u64 {
+    GLOBAL_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+pub fn reset_session_counter() {
+    GLOBAL_SESSION_COUNTER.store(1, Ordering::Relaxed);
+}
+
 pub(crate) fn extract_header(headers: &[(String, String)], name: &str) -> Option<String> {
     headers
         .iter()
