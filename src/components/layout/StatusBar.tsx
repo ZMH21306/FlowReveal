@@ -15,27 +15,29 @@ export function StatusBar() {
   const captureStatus = useStore((s: StoreState) => s.captureStatus);
 
   return (
-    <div className="flex items-center gap-6 px-4 py-1.5 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
+    <div className="flex items-center gap-5 px-4 py-1 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)] text-[11px] text-[var(--color-text-muted)] shrink-0">
       <span className="flex items-center gap-1.5">
         <span
-          className={`w-2 h-2 rounded-full ${
+          className={`w-1.5 h-1.5 rounded-full ${
             captureStatus === "Running"
-              ? "bg-[var(--color-success)]"
+              ? "bg-[var(--color-success)] shadow-[0_0_6px_var(--color-success)]"
               : captureStatus === "Error"
                 ? "bg-[var(--color-error)]"
-                : "bg-[var(--color-text-secondary)]"
+                : "bg-[var(--color-text-muted)]"
           }`}
         />
-        {STATUS_LABELS[captureStatus] ?? captureStatus}
+        <span className="text-[var(--color-text-secondary)]">{STATUS_LABELS[captureStatus] ?? captureStatus}</span>
       </span>
-      <span>会话: {totalSessions}</span>
-      <span>活跃: {activeSessions}</span>
+      <span>会话 <span className="text-[var(--color-text-primary)] font-medium">{totalSessions}</span></span>
+      <span>活跃 <span className="text-[var(--color-text-primary)] font-medium">{activeSessions}</span></span>
       {decryptedCount > 0 && (
-        <span className="text-[var(--color-accent)]" style={{ fontFamily: "'Segoe UI Emoji', 'Apple Color Emoji', sans-serif" }}>
-          🔓 已解密: {decryptedCount}
+        <span className="text-[var(--color-accent)]">
+          🔓 {decryptedCount}
         </span>
       )}
-      <span>数据量: {formatSize(bytesCaptured)}</span>
+      <span>数据 <span className="text-[var(--color-text-primary)] font-medium">{formatSize(bytesCaptured)}</span></span>
+      <div className="flex-1" />
+      <span className="text-[9px] opacity-50">FlowReveal v1.0</span>
     </div>
   );
 }
