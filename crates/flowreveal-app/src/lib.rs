@@ -86,6 +86,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::capture::start_capture,
             commands::capture::stop_capture,
+            commands::capture::reset_session_counter,
             commands::traffic::get_requests,
             commands::traffic::get_sessions,
             commands::traffic::export_har,
