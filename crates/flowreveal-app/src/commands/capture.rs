@@ -1,5 +1,5 @@
 use tauri::{command, State, AppHandle, Emitter};
-use crate::state::AppState;
+use crate::state::{AppState, DiverterStatus};
 use engine_core::capture_config::{CaptureConfig, CaptureMode};
 use engine_core::engine_stats::CaptureStatus;
 use engine_core::http_message::{HttpMessage, HttpSession};
@@ -34,6 +34,18 @@ pub async fn start_capture(
         "[Capture] 开始初始化"
     );
 
+    {
+        let is_elevated = engine_core::divert::elevation::is_elevated();
+        *state.is_elevated.write().await = is_elevated;
+        tracing::info!(is_elevated, "[Capture] 管理员权限检查");
+
+        let is_wifi = engine_core::divert::wifi_detect::is_wifi_adapter();
+        *state.is_wifi.write().await = is_wifi;
+        if is_wifi {
+            tracing::warn!("[Capture] ⚠ 检测到 Wi-Fi 适配器，fast-path 可能导致全局捕获不可用");
+        }
+    }
+
     *state.capture_status.write().await = CaptureStatus::Running;
 
     let (tx, mut rx) = mpsc::channel::<HttpMessage>(4096);
@@ -42,8 +54,9 @@ pub async fn start_capture(
         *event_tx = Some(tx.clone());
     }
 
-    let should_start_forward = mode == CaptureMode::ForwardProxy || mode == CaptureMode::DualProxy;
-    let should_start_transparent = mode == CaptureMode::TransparentProxy || mode == CaptureMode::DualProxy;
+    let should_start_forward = true;
+    let should_start_transparent = mode == CaptureMode::Global;
+    let mut actual_mode = mode;
 
     let ca_ready: bool;
 
@@ -94,6 +107,7 @@ pub async fn start_capture(
 
     let mut forward_shutdown_handle: Option<tokio::sync::oneshot::Sender<()>> = None;
     let mut transparent_shutdown_handle: Option<tokio::sync::oneshot::Sender<()>> = None;
+    let mut diverter_shutdown_handle: Option<tokio::sync::oneshot::Sender<()>> = None;
 
     if should_start_forward {
         tracing::info!(port = forward_port, "[Capture] 启动正向代理");
@@ -135,27 +149,99 @@ pub async fn start_capture(
         #[cfg(target_os = "windows")]
         {
             use engine_core::proxy::transparent_proxy::TransparentProxy;
+            use engine_core::divert::nat_table::NatTable;
+            use std::sync::Arc;
+
             tracing::info!(port = transparent_port, "[Capture] 启动透明代理");
-            match TransparentProxy::start(transparent_port, &config, tx.clone()).await {
+
+            let nat_table = Arc::new(NatTable::new(65536));
+            let ca_manager = {
+                let ca_guard = state.ca_manager.read().await;
+                match ca_guard.as_ref() {
+                    Some(ca) => {
+                        let pem = ca.ca_cert_pem().to_string();
+                        let key = ca.ca_key_pem().to_string();
+                        Some(Arc::new(CaManager::from_pem(&pem, &key).expect("CA from_pem")))
+                    }
+                    None => None,
+                }
+            };
+            let rule_engine = state.rule_engine.clone();
+
+            match TransparentProxy::start(transparent_port, &config, tx.clone(), nat_table.clone(), ca_manager, rule_engine).await {
                 Ok(handle) => {
                     tracing::info!(port = transparent_port, "[Capture] 透明代理启动成功");
                     transparent_shutdown_handle = Some(handle.shutdown_tx);
                 }
                 Err(e) => {
-                    if let Some(shutdown) = forward_shutdown_handle.take() {
-                        let _ = shutdown.send(());
-                        tracing::warn!("[Capture] 已关闭正向代理（因透明代理启动失败）");
+                    tracing::warn!(port = transparent_port, error = %e, "[Capture] 透明代理启动失败，回退到仅代理模式");
+                    actual_mode = CaptureMode::ProxyOnly;
+                    *state.diverter_status.write().await = DiverterStatus::Error;
+                }
+            }
+
+            if transparent_shutdown_handle.is_some() {
+                #[cfg(feature = "windivert")]
+                {
+                    use engine_core::divert::diverter::{PacketDiverter, DivertConfig};
+
+                    let divert_config = DivertConfig {
+                        proxy_port: transparent_port,
+                        capture_ports: config.capture_ports.clone(),
+                        exclude_pids: config.exclude_pids.clone(),
+                        include_pids: config.include_pids.clone(),
+                        capture_localhost: config.capture_localhost,
+                    };
+
+                    let mut diverter = match PacketDiverter::new(divert_config, nat_table) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "[Capture] PacketDiverter 创建失败，回退到仅代理模式");
+                            *state.diverter_status.write().await = DiverterStatus::Error;
+                            actual_mode = CaptureMode::ProxyOnly;
+                            PacketDiverter::new(DivertConfig::default(), Arc::new(NatTable::new(1))).unwrap()
+                        }
+                    };
+
+                    match diverter.start() {
+                        Ok(()) => {
+                            tracing::info!("[Capture] ✓ WinDivert 数据包重定向器已启动");
+                            *state.diverter_status.write().await = DiverterStatus::Running;
+
+                            let (div_shutdown_tx, div_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+                            diverter_shutdown_handle = Some(div_shutdown_tx);
+
+                            tokio::spawn(async move {
+                                let _ = div_shutdown_rx.await;
+                                tracing::info!("[Capture] WinDivert 关闭信号已收到");
+                            });
+
+                            std::mem::forget(diverter);
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "[Capture] WinDivert 启动失败，回退到仅代理模式");
+                            *state.diverter_status.write().await = DiverterStatus::Error;
+                            actual_mode = CaptureMode::ProxyOnly;
+                        }
                     }
-                    *state.capture_status.write().await = CaptureStatus::Idle;
-                    tracing::error!(port = transparent_port, error = %e, "[Capture] 透明代理启动失败");
-                    return Err(format!("透明代理启动失败: {}", e));
+                }
+
+                #[cfg(not(feature = "windivert"))]
+                {
+                    tracing::warn!("[Capture] WinDivert 功能未编译，全局捕获不可用，回退到仅代理模式");
+                    *state.diverter_status.write().await = DiverterStatus::NotAvailable;
+                    actual_mode = CaptureMode::ProxyOnly;
                 }
             }
         }
         #[cfg(not(target_os = "windows"))]
         {
-            tracing::warn!("[Capture] 透明代理仅支持 Windows 平台，跳过");
+            tracing::warn!("[Capture] 透明代理仅支持 Windows 平台，回退到仅代理模式");
+            *state.diverter_status.write().await = DiverterStatus::NotAvailable;
+            actual_mode = CaptureMode::ProxyOnly;
         }
+    } else {
+        *state.diverter_status.write().await = DiverterStatus::Stopped;
     }
 
     *state.config.write().await = Some(config.clone());
@@ -164,6 +250,7 @@ pub async fn start_capture(
         let mut handles = state.proxy_handles.lock().await;
         handles.forward_shutdown = forward_shutdown_handle;
         handles.transparent_shutdown = transparent_shutdown_handle;
+        handles.diverter_shutdown = diverter_shutdown_handle;
     }
 
     if should_start_forward {
@@ -232,7 +319,7 @@ pub async fn start_capture(
     });
 
     tracing::info!(
-        mode = ?mode,
+        actual_mode = ?actual_mode,
         forward_port,
         transparent_port,
         https = capture_https,
@@ -254,15 +341,21 @@ pub async fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
 
     {
         let mut handles = state.proxy_handles.lock().await;
-        if let Some(shutdown) = handles.forward_shutdown.take() {
+        if let Some(shutdown) = handles.diverter_shutdown.take() {
             let _ = shutdown.send(());
-            tracing::debug!("[Capture] 正向代理关闭信号已发送");
+            tracing::debug!("[Capture] WinDivert 关闭信号已发送");
         }
         if let Some(shutdown) = handles.transparent_shutdown.take() {
             let _ = shutdown.send(());
             tracing::debug!("[Capture] 透明代理关闭信号已发送");
         }
+        if let Some(shutdown) = handles.forward_shutdown.take() {
+            let _ = shutdown.send(());
+            tracing::debug!("[Capture] 正向代理关闭信号已发送");
+        }
     }
+
+    *state.diverter_status.write().await = DiverterStatus::Stopped;
 
     if *state.cert_was_installed.read().await {
         tracing::info!("[Capture] 卸载 CA 证书");
@@ -309,4 +402,38 @@ pub fn reset_session_counter() -> Result<(), String> {
     engine_core::proxy::utils::reset_session_counter();
     tracing::debug!("[Capture] Session 计数器已重置");
     Ok(())
+}
+
+#[command]
+pub fn get_diverter_status(state: State<'_, AppState>) -> String {
+    let status = state.diverter_status.try_read();
+    match status {
+        Ok(s) => match *s {
+            DiverterStatus::NotAvailable => "NotAvailable".to_string(),
+            DiverterStatus::Stopped => "Stopped".to_string(),
+            DiverterStatus::Running => "Running".to_string(),
+            DiverterStatus::Error => "Error".to_string(),
+        },
+        Err(_) => "Unknown".to_string(),
+    }
+}
+
+#[command]
+pub fn is_elevated(state: State<'_, AppState>) -> bool {
+    let elevated = state.is_elevated.try_read();
+    match elevated {
+        Ok(s) => *s,
+        Err(_) => engine_core::divert::elevation::is_elevated(),
+    }
+}
+
+#[command]
+pub fn is_wifi_adapter() -> bool {
+    engine_core::divert::wifi_detect::is_wifi_adapter()
+}
+
+#[command]
+pub fn request_elevation() -> Result<(), String> {
+    engine_core::divert::elevation::request_elevation()
+        .map_err(|e| format!("提权请求失败: {}", e))
 }
