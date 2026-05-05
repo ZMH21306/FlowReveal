@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useStore, type StoreState } from "../../store";
-import { startCapture, stopCapture, exportHar } from "../../lib/tauri-bindings";
-import type { CaptureConfig, CaptureMode } from "../../types";
+import { startCapture, stopCapture, exportHar, requestElevation } from "../../lib/tauri-bindings";
+import type { CaptureConfig } from "../../types";
 import { getStoredTheme, setStoredTheme, type ThemeMode } from "../../hooks/useTheme";
 
 interface ToolbarProps {
@@ -19,33 +19,50 @@ interface ToolbarProps {
 export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, onOpenTransformer, onOpenAi, onOpenDiff, onOpenVuln, onOpenPlugins }: ToolbarProps) {
   const captureStatus = useStore((s: StoreState) => s.captureStatus);
   const setCaptureStatus = useStore((s: StoreState) => s.setCaptureStatus);
+  const setCaptureMode = useStore((s: StoreState) => s.setCaptureMode);
   const clearRequests = useStore((s: StoreState) => s.clearRequests);
-  const [captureMode, setCaptureMode] = useState<CaptureMode>("DualProxy");
   const [captureHttps, setCaptureHttps] = useState(true);
+  const [globalCapture, setGlobalCapture] = useState(true);
+  const [captureLocalhost, setCaptureLocalhost] = useState(false);
+  const [capturePorts, setCapturePorts] = useState("80, 443");
+  const [proxyPort, setProxyPort] = useState(8080);
+  const [transparentPort, setTransparentPort] = useState(8081);
   const [pending, setPending] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme());
+  const [showPortConfig, setShowPortConfig] = useState(false);
 
   const handleStart = async () => {
     setPending(true);
     setErrorMsg(null);
     try {
+      const ports = capturePorts.split(",").map(p => parseInt(p.trim())).filter(p => !isNaN(p) && p > 0 && p <= 65535);
+      if (ports.length === 0) {
+        setErrorMsg("请输入有效的捕获端口");
+        setPending(false);
+        return;
+      }
       const config: CaptureConfig = {
-        mode: captureMode,
+        mode: globalCapture ? "Global" : "ProxyOnly",
         capture_http: true,
         capture_https: captureHttps,
-        ports: [8080, 8081],
+        ports: [proxyPort, transparentPort],
         process_filters: [],
         host_filters: [],
         max_body_size: 5 * 1024 * 1024,
         ca_cert_path: null,
         ca_key_path: null,
         mitm_bypass_hosts: [],
-        proxy_port: 8080,
-        transparent_proxy_port: 8081,
+        proxy_port: proxyPort,
+        transparent_proxy_port: transparentPort,
+        capture_ports: ports,
+        exclude_pids: [],
+        include_pids: [],
+        capture_localhost: captureLocalhost,
       };
       await startCapture(config);
       setCaptureStatus("Running");
+      setCaptureMode(globalCapture ? "Global" : "ProxyOnly");
     } catch (e) {
       setErrorMsg(String(e));
     } finally {
@@ -62,6 +79,14 @@ export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, on
       setErrorMsg(String(e));
     } finally {
       setPending(false);
+    }
+  };
+
+  const handleRequestElevation = async () => {
+    try {
+      await requestElevation();
+    } catch (e) {
+      setErrorMsg(`提权失败: ${e}`);
     }
   };
 
@@ -108,16 +133,6 @@ export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, on
             ▶ 开始
           </button>
         )}
-        <select
-          value={captureMode}
-          onChange={(e) => setCaptureMode(e.target.value as CaptureMode)}
-          disabled={isRunning}
-          className="px-2 py-1.5 text-[11px] bg-[var(--color-bg-tertiary)] border border-[var(--color-border-subtle)] rounded-[var(--radius-md)] text-[var(--color-text-primary)] disabled:opacity-50"
-        >
-          <option value="DualProxy">双代理</option>
-          <option value="ForwardProxy">正向代理</option>
-          <option value="Transparent">透明代理</option>
-        </select>
         <label className="flex items-center gap-1 text-[11px] text-[var(--color-text-secondary)] cursor-pointer select-none">
           <input
             type="checkbox"
@@ -128,7 +143,85 @@ export function Toolbar({ onToggleRules, showRules, onToggleStats, showStats, on
           />
           HTTPS 解密
         </label>
+        <label className="flex items-center gap-1 text-[11px] text-[var(--color-text-secondary)] cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={globalCapture}
+            onChange={(e) => setGlobalCapture(e.target.checked)}
+            disabled={isRunning}
+            className="accent-[var(--color-accent)]"
+          />
+          全局捕获
+          {globalCapture && (
+            <button
+              onClick={handleRequestElevation}
+              className="text-[9px] text-[var(--color-warning)] hover:text-[var(--color-accent)] underline cursor-pointer"
+              title="点击请求管理员提权"
+            >
+              ⚠ 需管理员
+            </button>
+          )}
+        </label>
+        {globalCapture && (
+          <label className="flex items-center gap-1 text-[11px] text-[var(--color-text-secondary)] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={captureLocalhost}
+              onChange={(e) => setCaptureLocalhost(e.target.checked)}
+              disabled={isRunning}
+              className="accent-[var(--color-accent)]"
+            />
+            localhost
+          </label>
+        )}
+        <button
+          onClick={() => setShowPortConfig(!showPortConfig)}
+          className="px-1.5 py-1 text-[10px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] rounded transition-all cursor-pointer"
+          title="端口配置"
+        >
+          ⚙ 端口
+        </button>
       </div>
+
+      {showPortConfig && (
+        <div className="flex items-center gap-2 px-2 py-1 bg-[var(--color-bg-tertiary)] rounded border border-[var(--color-border)] text-[10px]">
+          <label className="flex items-center gap-1 text-[var(--color-text-secondary)]">
+            代理:
+            <input
+              type="number"
+              value={proxyPort}
+              onChange={(e) => setProxyPort(parseInt(e.target.value) || 8080)}
+              disabled={isRunning}
+              className="w-14 px-1 py-0.5 bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded text-[var(--color-text-primary)] text-[10px] text-center"
+              min={1}
+              max={65535}
+            />
+          </label>
+          <label className="flex items-center gap-1 text-[var(--color-text-secondary)]">
+            透明:
+            <input
+              type="number"
+              value={transparentPort}
+              onChange={(e) => setTransparentPort(parseInt(e.target.value) || 8081)}
+              disabled={isRunning}
+              className="w-14 px-1 py-0.5 bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded text-[var(--color-text-primary)] text-[10px] text-center"
+              min={1}
+              max={65535}
+            />
+          </label>
+          <label className="flex items-center gap-1 text-[var(--color-text-secondary)]">
+            捕获端口:
+            <input
+              type="text"
+              value={capturePorts}
+              onChange={(e) => setCapturePorts(e.target.value)}
+              disabled={isRunning}
+              className="w-20 px-1 py-0.5 bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded text-[var(--color-text-primary)] text-[10px]"
+              placeholder="80, 443"
+            />
+          </label>
+        </div>
+      )}
 
       <div className="w-px h-5 bg-[var(--color-border)]" />
 
