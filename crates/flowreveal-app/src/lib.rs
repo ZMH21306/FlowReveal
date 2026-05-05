@@ -1,6 +1,5 @@
 mod commands;
 mod state;
-mod events;
 
 use state::AppState;
 use tauri::Manager;
@@ -14,24 +13,36 @@ pub fn run() {
     let file_appender = tracing_appender::rolling::daily(&log_dir, "flowreveal.log");
     let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
 
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new("info,engine_core::proxy=info,engine_core::platform_integration=warn")
+        });
 
     use tracing_subscriber::prelude::*;
 
+    let stdout_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let file_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+
     let stdout_layer = tracing_subscriber::fmt::layer()
-        .with_filter(env_filter.clone());
+        .with_target(true)
+        .with_filter(stdout_filter);
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(file_writer)
         .with_ansi(false)
-        .with_filter(env_filter);
+        .with_target(true)
+        .with_filter(file_filter);
 
     tracing_subscriber::registry()
         .with(stdout_layer)
         .with(file_layer)
         .init();
 
-    tracing::info!("[Init] FlowReveal 日志系统已初始化，日志写入 {:?}", log_dir);
+    tracing::info!(
+        path = %log_dir.display(),
+        "[Init] FlowReveal 日志系统已初始化"
+    );
 
     let app_state = AppState::new();
     let cleanup_proxy = app_state.proxy_was_set.clone();
@@ -43,30 +54,21 @@ pub fn run() {
             let original = cleanup_original.blocking_lock();
             if let Some(ref orig) = *original {
                 match engine_core::platform_integration::windows::restore_system_proxy(orig) {
-                    Ok(()) => tracing::info!("[Cleanup] 退出时系统代理已恢复"),
-                    Err(e) => tracing::warn!("[Cleanup] 退出时系统代理恢复失败: {}", e),
+                    Ok(()) => tracing::info!("[Cleanup] 系统代理已恢复"),
+                    Err(e) => tracing::warn!(error = %e, "[Cleanup] 系统代理恢复失败"),
                 }
             } else {
                 match engine_core::platform_integration::windows::clear_system_proxy() {
-                    Ok(()) => tracing::info!("[Cleanup] 退出时系统代理已清除"),
-                    Err(e) => tracing::warn!("[Cleanup] 退出时系统代理清除失败: {}", e),
+                    Ok(()) => tracing::info!("[Cleanup] 系统代理已清除"),
+                    Err(e) => tracing::warn!(error = %e, "[Cleanup] 系统代理清除失败"),
                 }
             }
         }
 
         if *cleanup_cert.blocking_read() {
             match engine_core::platform_integration::windows::uninstall_ca_certificate() {
-                Ok(()) => tracing::info!("[Cleanup] 退出时 CA 证书已移除"),
-                Err(e) => tracing::warn!("[Cleanup] 退出时 CA 证书移除失败: {}", e),
-            }
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            use engine_core::proxy::transparent_proxy::wfp_engine;
-            match wfp_engine::uninstall_redirect_filters() {
-                Ok(()) => tracing::info!("[Cleanup] 退出时 WFP 过滤器已卸载"),
-                Err(e) => tracing::warn!("[Cleanup] 退出时 WFP 过滤器卸载失败: {}", e),
+                Ok(()) => tracing::info!("[Cleanup] CA 证书已移除"),
+                Err(e) => tracing::warn!(error = %e, "[Cleanup] CA 证书移除失败"),
             }
         }
     };
@@ -119,8 +121,8 @@ pub fn run() {
 
                 if cert_was_installed {
                     match engine_core::platform_integration::windows::uninstall_ca_certificate() {
-                        Ok(()) => tracing::info!("[Cleanup] 窗口关闭时 CA 证书已移除"),
-                        Err(e) => tracing::warn!("[Cleanup] 窗口关闭时 CA 证书移除失败: {}", e),
+                        Ok(()) => tracing::info!("[Cleanup] CA 证书已移除"),
+                        Err(e) => tracing::warn!(error = %e, "[Cleanup] CA 证书移除失败"),
                     }
                 }
 
@@ -128,18 +130,9 @@ pub fn run() {
                     let original = state.original_proxy_settings.blocking_lock();
                     if let Some(ref orig) = *original {
                         match engine_core::platform_integration::windows::restore_system_proxy(orig) {
-                            Ok(()) => tracing::info!("[Cleanup] 窗口关闭时系统代理已恢复"),
-                            Err(e) => tracing::warn!("[Cleanup] 窗口关闭时系统代理恢复失败: {}", e),
+                            Ok(()) => tracing::info!("[Cleanup] 系统代理已恢复"),
+                            Err(e) => tracing::warn!(error = %e, "[Cleanup] 系统代理恢复失败"),
                         }
-                    }
-                }
-
-                #[cfg(target_os = "windows")]
-                {
-                    use engine_core::proxy::transparent_proxy::wfp_engine;
-                    match wfp_engine::uninstall_redirect_filters() {
-                        Ok(()) => tracing::info!("[Cleanup] 窗口关闭时 WFP 过滤器已卸载"),
-                        Err(e) => tracing::warn!("[Cleanup] 窗口关闭时 WFP 过滤器卸载失败: {}", e),
                     }
                 }
             }
