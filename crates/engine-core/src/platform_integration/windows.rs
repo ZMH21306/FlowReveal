@@ -1,167 +1,11 @@
 use serde::{Deserialize, Serialize};
+use crate::process_info::ProcessInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxySettings {
-    pub proxy_enabled: bool,
-    pub proxy_server: String,
-    pub proxy_override: String,
-}
-
-pub fn set_system_proxy(proxy_addr: &str) -> Result<ProxySettings, String> {
-    let original = get_current_proxy_settings()?;
-
-    set_registry_proxy(true, proxy_addr, "<local>")?;
-
-    notify_proxy_change();
-
-    tracing::info!("System proxy set to {}", proxy_addr);
-    Ok(original)
-}
-
-pub fn restore_system_proxy(original: &ProxySettings) -> Result<(), String> {
-    set_registry_proxy(
-        original.proxy_enabled,
-        &original.proxy_server,
-        &original.proxy_override,
-    )?;
-
-    notify_proxy_change();
-
-    tracing::info!("System proxy restored to enabled={}, server={}", original.proxy_enabled, original.proxy_server);
-    Ok(())
-}
-
-pub fn clear_system_proxy() -> Result<(), String> {
-    set_registry_proxy(false, "", "")?;
-    notify_proxy_change();
-    tracing::info!("System proxy cleared");
-    Ok(())
-}
-
-fn get_current_proxy_settings() -> Result<ProxySettings, String> {
-    use winreg::enums::*;
-    use winreg::RegKey;
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let key = hkcu
-        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
-        .map_err(|e| format!("Failed to open registry: {}", e))?;
-
-    let proxy_enabled: u32 = key.get_value("ProxyEnable").unwrap_or(0);
-    let proxy_server: String = key.get_value("ProxyServer").unwrap_or_default();
-    let proxy_override: String = key.get_value("ProxyOverride").unwrap_or_default();
-
-    Ok(ProxySettings {
-        proxy_enabled: proxy_enabled != 0,
-        proxy_server,
-        proxy_override,
-    })
-}
-
-fn set_registry_proxy(enabled: bool, server: &str, override_str: &str) -> Result<(), String> {
-    use winreg::enums::*;
-    use winreg::RegKey;
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let key = hkcu
-        .open_subkey_with_flags(
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-            KEY_SET_VALUE,
-        )
-        .map_err(|e| format!("Failed to open registry for writing: {}", e))?;
-
-    let enable_val: u32 = if enabled { 1 } else { 0 };
-    key.set_value("ProxyEnable", &enable_val)
-        .map_err(|e| format!("Failed to set ProxyEnable: {}", e))?;
-
-    if !server.is_empty() {
-        key.set_value("ProxyServer", &server)
-            .map_err(|e| format!("Failed to set ProxyServer: {}", e))?;
-    }
-
-    if !override_str.is_empty() {
-        key.set_value("ProxyOverride", &override_str)
-            .map_err(|e| format!("Failed to set ProxyOverride: {}", e))?;
-    }
-
-    Ok(())
-}
-
-fn notify_proxy_change() {
-    use windows::Win32::Networking::WinInet::*;
-
-    unsafe {
-        let _ = InternetSetOptionW(None, INTERNET_OPTION_SETTINGS_CHANGED, None, 0);
-        let _ = InternetSetOptionW(None, INTERNET_OPTION_REFRESH, None, 0);
-    }
-}
-
-pub fn install_ca_certificate(cert_pem: &str) -> Result<(), String> {
-    let temp_dir = std::env::temp_dir();
-    let cert_path = temp_dir.join("FlowReveal-CA.crt");
-    std::fs::write(&cert_path, cert_pem)
-        .map_err(|e| format!("Failed to write cert file: {}", e))?;
-
-    let output = std::process::Command::new("certutil.exe")
-        .args(["-addstore", "-user", "Root", &cert_path.to_string_lossy()])
-        .output()
-        .map_err(|e| format!("Failed to run certutil: {}", e))?;
-
-    let _ = std::fs::remove_file(&cert_path);
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if output.status.success() {
-        tracing::info!("CA certificate installed to current user's Trusted Root store");
-        Ok(())
-    } else if stdout.contains("already in the store") || stdout.contains("already exists") {
-        tracing::info!("CA certificate already exists in the store");
-        Ok(())
-    } else {
-        tracing::warn!("certutil output: {}", stdout);
-        tracing::warn!("certutil stderr: {}", stderr);
-        Err(format!("certutil failed: {}", stdout.trim()))
-    }
-}
-
-pub fn uninstall_ca_certificate() -> Result<(), String> {
-    let output = std::process::Command::new("certutil.exe")
-        .args(["-delstore", "-user", "Root", "FlowReveal CA"])
-        .output()
-        .map_err(|e| format!("Failed to run certutil: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    tracing::debug!("certutil del output: {}", stdout);
-
-    if output.status.success() {
-        tracing::info!("CA certificate removed from current user's Trusted Root store");
-    } else {
-        tracing::debug!("certutil del may have failed (cert may not exist): {}", stdout.trim());
-    }
-
-    Ok(())
-}
-
-pub fn is_ca_certificate_installed() -> bool {
-    let output = std::process::Command::new("certutil.exe")
-        .args(["-store", "-user", "Root", "FlowReveal CA"])
-        .output();
-
-    match output {
-        Ok(o) => {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            stdout.contains("FlowReveal CA") && stdout.contains("Cert")
-        }
-        Err(_) => false,
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ProcessInfo {
-    pub pid: u32,
-    pub name: String,
-    pub path: Option<String>,
+    pub enabled: bool,
+    pub server: String,
+    pub port: u16,
 }
 
 pub fn find_process_by_connection(local_addr: &str, local_port: u16) -> Option<ProcessInfo> {
@@ -179,7 +23,7 @@ fn find_process_by_ipv4(local_addr: &str, local_port: u16) -> Option<ProcessInfo
     let local_ip: Ipv4Addr = match local_addr.parse() {
         Ok(ip) => ip,
         Err(_) => {
-            tracing::debug!("[ProcessLookup] IPv4解析失败: {}", local_addr);
+            tracing::trace!(addr = local_addr, "[ProcessLookup] IPv4 地址解析失败");
             return None;
         }
     };
@@ -187,68 +31,48 @@ fn find_process_by_ipv4(local_addr: &str, local_port: u16) -> Option<ProcessInfo
     let ip_native = u32::from_le_bytes(local_ip.octets());
     let port_native = (local_port as u16).to_be() as u32;
 
-    tracing::info!("[ProcessLookup] IPv4查询目标 {}:{} | ip_native=0x{:08X} port_native=0x{:08X}", local_addr, local_port, ip_native, port_native);
+    tracing::trace!(
+        addr = local_addr,
+        port = local_port,
+        "[ProcessLookup] IPv4 查询"
+    );
 
     unsafe {
         let mut size: u32 = 0;
         let _ = GetExtendedTcpTable(None, &mut size, false, AF_INET.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
         if size == 0 {
-            tracing::warn!("[ProcessLookup] IPv4 TCP表大小为0");
+            tracing::debug!("[ProcessLookup] GetExtendedTcpTable(IPv4) 返回 size=0");
             return None;
         }
 
         let mut buffer = vec![0u8; size as usize];
-        let result = GetExtendedTcpTable(Some(buffer.as_mut_ptr() as *mut _), &mut size, false, AF_INET.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
+        let result = GetExtendedTcpTable(
+            Some(buffer.as_mut_ptr() as *mut _),
+            &mut size,
+            false,
+            AF_INET.0 as u32,
+            TCP_TABLE_OWNER_PID_ALL,
+            0,
+        );
         if result != 0 {
-            tracing::warn!("[ProcessLookup] GetExtendedTcpTable(IPv4)失败: {}", result);
+            tracing::warn!(result, "[ProcessLookup] GetExtendedTcpTable(IPv4) 调用失败");
             return None;
         }
 
         let table = buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
         let num_entries = (*table).dwNumEntries;
+
         let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_TCPROW_OWNER_PID;
-
-        tracing::info!("[ProcessLookup] IPv4 TCP表共{}条", num_entries);
-
-        let mut match_count = 0u32;
         for i in 0..num_entries {
             let row = &*rows_ptr.add(i as usize);
-
-            let row_ip = row.dwLocalAddr;
-            let row_port = row.dwLocalPort;
-            let row_pid = row.dwOwningPid;
-
-            if i < 10 {
-                let row_ip_le = u32::from_le_bytes(row_ip.to_ne_bytes());
-                let row_ip_str_le = format!("{}.{}.{}.{}",
-                    (row_ip_le >> 24) as u8,
-                    ((row_ip_le >> 16) & 0xFF) as u8,
-                    ((row_ip_le >> 8) & 0xFF) as u8,
-                    (row_ip_le & 0xFF) as u8,
-                );
-                let row_ip_str_raw = format!("{}.{}.{}.{}",
-                    (row_ip >> 24) as u8,
-                    ((row_ip >> 16) & 0xFF) as u8,
-                    ((row_ip >> 8) & 0xFF) as u8,
-                    (row_ip & 0xFF) as u8,
-                );
-                let row_port_val = (row_port >> 16) as u16;
-                let row_port_le = u32::from_le(row_port) >> 16;
-                tracing::info!("[ProcessLookup]   行[{}] ip_raw=0x{:08X}({}) ip_le=0x{:08X}({}) port_raw=0x{:08X}(>>16={}) port_le_shifted={} pid={}",
-                    i, row_ip, row_ip_str_raw, row_ip_le, row_ip_str_le, row_port, row_port_val, row_port_le, row_pid);
+            if row.dwLocalAddr == ip_native && row.dwLocalPort == port_native {
+                let pid = row.dwOwningPid;
+                tracing::debug!(pid, addr = local_addr, port = local_port, "[ProcessLookup] IPv4 命中");
+                return get_process_info(pid);
             }
-
-            let ip_match = row_ip == ip_native;
-            let port_match = row_port == port_native;
-
-            if ip_match && port_match {
-                tracing::info!("[ProcessLookup] ✓ IPv4命中 PID={}", row_pid);
-                return get_process_info(row_pid);
-            }
-            if ip_match { match_count += 1; }
         }
 
-        tracing::info!("[ProcessLookup] IPv4未命中 (ip匹配{}条但port无匹配)", match_count);
+        tracing::trace!(num_entries, "[ProcessLookup] IPv4 未命中");
     }
     None
 }
@@ -261,108 +85,480 @@ fn find_process_by_ipv6(local_addr: &str, local_port: u16) -> Option<ProcessInfo
     let local_ip: Ipv6Addr = match local_addr.parse() {
         Ok(ip) => ip,
         Err(_) => {
-            tracing::debug!("[ProcessLookup] IPv6解析失败: {}", local_addr);
+            tracing::trace!(addr = local_addr, "[ProcessLookup] IPv6 地址解析失败");
             return None;
         }
     };
 
-    let port_native = (local_port as u16).to_be() as u32;
     let ip_bytes = local_ip.octets();
+    let port_native = (local_port as u16).to_be() as u32;
 
-    tracing::info!("[ProcessLookup] IPv6查询目标 [{}]:{} | port_native=0x{:08X}", local_addr, local_port, port_native);
+    tracing::trace!(
+        addr = local_addr,
+        port = local_port,
+        "[ProcessLookup] IPv6 查询"
+    );
 
     unsafe {
         let mut size: u32 = 0;
         let _ = GetExtendedTcpTable(None, &mut size, false, AF_INET6.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
         if size == 0 {
-            tracing::info!("[ProcessLookup] IPv6 TCP表大小为0");
+            tracing::debug!("[ProcessLookup] GetExtendedTcpTable(IPv6) 返回 size=0");
             return None;
         }
 
         let mut buffer = vec![0u8; size as usize];
-        let result = GetExtendedTcpTable(Some(buffer.as_mut_ptr() as *mut _), &mut size, false, AF_INET6.0 as u32, TCP_TABLE_OWNER_PID_ALL, 0);
+        let result = GetExtendedTcpTable(
+            Some(buffer.as_mut_ptr() as *mut _),
+            &mut size,
+            false,
+            AF_INET6.0 as u32,
+            TCP_TABLE_OWNER_PID_ALL,
+            0,
+        );
         if result != 0 {
-            tracing::warn!("[ProcessLookup] GetExtendedTcpTable(IPv6)失败: {}", result);
+            tracing::warn!(result, "[ProcessLookup] GetExtendedTcpTable(IPv6) 调用失败");
             return None;
         }
 
         let table = buffer.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID;
         let num_entries = (*table).dwNumEntries;
+
         let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_TCP6ROW_OWNER_PID;
-
-        tracing::info!("[ProcessLookup] IPv6 TCP表共{}条", num_entries);
-
         for i in 0..num_entries {
             let row = &*rows_ptr.add(i as usize);
-            let row_addr = &row.ucLocalAddr;
-
-            let ip_match = row_addr[..] == ip_bytes;
-            let port_match = row.dwLocalPort == port_native;
-
-            if ip_match {
-                let row_port_val = (row.dwLocalPort >> 16) as u16;
-                tracing::info!("[ProcessLookup]   IPv6行[{}] ip匹配! port=0x{:08X}(解码={}) pid={} port_match={}",
-                    i, row.dwLocalPort, row_port_val, row.dwOwningPid, port_match);
-            }
-
-            if ip_match && port_match {
-                tracing::info!("[ProcessLookup] ✓ IPv6命中 PID={}", row.dwOwningPid);
-                return get_process_info(row.dwOwningPid);
+            let row_ip_bytes = std::slice::from_raw_parts(
+                row.ucLocalAddr.as_ptr() as *const u8,
+                16,
+            );
+            if row_ip_bytes == ip_bytes && row.dwLocalPort == port_native {
+                let pid = row.dwOwningPid;
+                tracing::debug!(pid, addr = local_addr, port = local_port, "[ProcessLookup] IPv6 命中");
+                return get_process_info(pid);
             }
         }
 
-        tracing::info!("[ProcessLookup] IPv6未命中");
+        tracing::trace!(num_entries, "[ProcessLookup] IPv6 未命中");
     }
     None
 }
 
 fn get_process_info(pid: u32) -> Option<ProcessInfo> {
-    use windows::Win32::System::Diagnostics::ToolHelp::*;
-
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
-        let mut entry = PROCESSENTRY32::default();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
-
-        if Process32First(snapshot, &mut entry).is_ok() {
-            loop {
-                if entry.th32ProcessID == pid {
-                    let name_bytes: Vec<u8> = entry.szExeFile
-                        .iter()
-                        .take_while(|&&c| c != 0)
-                        .map(|&c| c as u8)
-                        .collect();
-                    let name = String::from_utf8_lossy(&name_bytes).to_string();
-                    let path = get_process_path(pid);
-                    return Some(ProcessInfo { pid, name, path });
-                }
-                if Process32Next(snapshot, &mut entry).is_err() {
-                    break;
-                }
-            }
-        }
-    }
-
-    None
-}
-
-fn get_process_path(pid: u32) -> Option<String> {
     use windows::Win32::System::Threading::*;
 
     unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let mut buf = [0u16; 512];
-        let mut size = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(
+        let access = PROCESS_QUERY_LIMITED_INFORMATION;
+        let handle = match OpenProcess(access, false, pid) {
+            Ok(h) => h,
+            Err(_) => {
+                tracing::trace!(pid, "[ProcessLookup] OpenProcess 失败");
+                return None;
+            }
+        };
+
+        let name = get_process_name(handle);
+        let path = get_process_path(handle);
+        let _ = windows::Win32::Foundation::CloseHandle(handle);
+
+        match name {
+            Some(n) if !n.is_empty() => Some(ProcessInfo::new(pid, n).with_path(path.unwrap_or_default())),
+            _ => None
+        }
+    }
+}
+
+fn get_process_name(handle: windows::Win32::Foundation::HANDLE) -> Option<String> {
+    use windows::Win32::System::Threading::*;
+    unsafe {
+        let mut buffer = [0u16; 512];
+        let mut size = buffer.len() as u32;
+        if QueryFullProcessImageNameW(
             handle,
             PROCESS_NAME_FORMAT(0),
-            windows::core::PWSTR(buf.as_mut_ptr()),
+            windows::core::PWSTR(buffer.as_mut_ptr()),
             &mut size,
-        );
-        if ok.is_ok() && size > 0 {
-            Some(String::from_utf16_lossy(&buf[..size as usize]))
-        } else {
-            None
+        ).is_err() {
+            return None;
         }
+        let path = String::from_utf16_lossy(&buffer[..size as usize]);
+        path.rsplit('\\').next().map(|s| s.to_string())
+    }
+}
+
+fn get_process_path(handle: windows::Win32::Foundation::HANDLE) -> Option<String> {
+    use windows::Win32::System::Threading::*;
+    unsafe {
+        let mut buffer = [0u16; 512];
+        let mut size = buffer.len() as u32;
+        if QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut size,
+        ).is_err() {
+            return None;
+        }
+        let path = String::from_utf16_lossy(&buffer[..size as usize]);
+        if path.is_empty() { None } else { Some(path) }
+    }
+}
+
+pub fn install_ca_certificate(cert_pem: &str) -> Result<(), String> {
+    use windows::Win32::Security::Cryptography::*;
+    use windows::core::PCWSTR;
+
+    let der = pem_to_der(cert_pem).map_err(|e| e.to_string())?;
+
+    unsafe {
+        let store_name = windows::core::HSTRING::from("Root");
+        let h_store = CertOpenStore(
+            CERT_STORE_PROV_SYSTEM_W,
+            CERT_QUERY_ENCODING_TYPE(0),
+            None,
+            CERT_OPEN_STORE_FLAGS(CERT_SYSTEM_STORE_CURRENT_USER as u32),
+            Some(PCWSTR(store_name.as_ptr()).as_ptr() as *const _),
+        ).map_err(|e| format!("Failed to open certificate store: {}", e))?;
+
+        let result = CertAddEncodedCertificateToStore(
+            Some(h_store),
+            X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+            &der,
+            CERT_STORE_ADD_REPLACE_EXISTING,
+            None,
+        );
+
+        let _ = CertCloseStore(Some(h_store), 0);
+
+        if result.is_err() {
+            return Err("Failed to add certificate to store".to_string());
+        }
+
+        tracing::info!("[CertInstall] CA 证书已安装到受信任根证书存储");
+        Ok(())
+    }
+}
+
+pub fn remove_ca_certificate(cert_pem: &str) -> Result<(), String> {
+    use windows::Win32::Security::Cryptography::*;
+    use windows::core::PCWSTR;
+
+    let der = pem_to_der(cert_pem).map_err(|e| e.to_string())?;
+
+    unsafe {
+        let store_name = windows::core::HSTRING::from("Root");
+        let h_store = CertOpenStore(
+            CERT_STORE_PROV_SYSTEM_W,
+            CERT_QUERY_ENCODING_TYPE(0),
+            None,
+            CERT_OPEN_STORE_FLAGS(CERT_SYSTEM_STORE_CURRENT_USER as u32),
+            Some(PCWSTR(store_name.as_ptr()).as_ptr() as *const _),
+        ).map_err(|e| format!("Failed to open certificate store: {}", e))?;
+
+        let mut found = false;
+        let mut cert_context = CertEnumCertificatesInStore(h_store, None);
+
+        while !cert_context.is_null() {
+            let cert_der = std::slice::from_raw_parts(
+                (*cert_context).pbCertEncoded,
+                (*cert_context).cbCertEncoded as usize,
+            );
+
+            if cert_der == der.as_slice() {
+                let _ = CertDeleteCertificateFromStore(cert_context);
+                found = true;
+                break;
+            }
+
+            cert_context = CertEnumCertificatesInStore(h_store, Some(cert_context));
+        }
+
+        let _ = CertCloseStore(Some(h_store), 0);
+
+        if found {
+            tracing::info!("[CertInstall] CA 证书已从受信任根证书存储移除");
+        } else {
+            tracing::debug!("[CertInstall] 未找到匹配的 CA 证书");
+        }
+        Ok(())
+    }
+}
+
+fn pem_to_der(pem: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let lines: Vec<&str> = pem.lines().collect();
+    let b64: String = lines[1..lines.len().saturating_sub(1)]
+        .iter()
+        .map(|l| l.trim())
+        .collect();
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| e.into())
+}
+
+pub fn set_system_proxy(proxy_addr: &str) -> Result<ProxySettings, String> {
+    let original = get_system_proxy()?;
+
+    let parts: Vec<&str> = proxy_addr.split(':').collect();
+    let server = parts.first().unwrap_or(&"127.0.0.1").to_string();
+    let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(8080);
+
+    set_system_proxy_internal(true, &server, port)?;
+
+    tracing::info!(
+        enabled = original.0,
+        server = %original.1,
+        port = original.2,
+        "[SystemProxy] 系统代理已设置，原始配置已保存"
+    );
+
+    Ok(ProxySettings {
+        enabled: original.0,
+        server: original.1,
+        port: original.2,
+    })
+}
+
+pub fn restore_system_proxy(settings: &ProxySettings) -> Result<(), String> {
+    if settings.enabled {
+        set_system_proxy_internal(true, &settings.server, settings.port)?;
+        tracing::info!(server = %settings.server, port = settings.port, "[SystemProxy] 系统代理已恢复");
+    } else {
+        set_system_proxy_internal(false, "", 0)?;
+        tracing::info!("[SystemProxy] 系统代理已禁用");
+    }
+    Ok(())
+}
+
+pub fn clear_system_proxy() -> Result<(), String> {
+    set_system_proxy_internal(false, "", 0)?;
+    tracing::info!("[SystemProxy] 系统代理已清除");
+    Ok(())
+}
+
+fn set_system_proxy_internal(enable: bool, server: &str, port: u16) -> Result<(), String> {
+    use windows::Win32::System::Registry::*;
+    use windows::core::{HSTRING, PCWSTR};
+
+    let key_path = HSTRING::from(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings");
+    let mut h_key = Default::default();
+
+    unsafe {
+        let result = RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key_path.as_ptr()),
+            Some(0),
+            KEY_SET_VALUE,
+            &mut h_key,
+        );
+
+        if result.is_err() {
+            return Err("Failed to open registry key".to_string());
+        }
+
+        if enable {
+            let enable_val: u32 = 1;
+            let server_str = format!("{}:{}", server, port);
+            let server_wide = HSTRING::from(server_str.as_str());
+
+            let _ = RegSetValueExW(
+                h_key,
+                PCWSTR(HSTRING::from("ProxyEnable").as_ptr()),
+                None,
+                REG_DWORD,
+                Some(&enable_val.to_le_bytes()),
+            );
+
+            let server_bytes: Vec<u8> = std::slice::from_raw_parts(
+                    server_wide.as_ptr() as *const u8,
+                    server_wide.len() * 2 + 2,
+                ).to_vec();
+            let _ = RegSetValueExW(
+                h_key,
+                PCWSTR(HSTRING::from("ProxyServer").as_ptr()),
+                None,
+                REG_SZ,
+                Some(&server_bytes),
+            );
+        } else {
+            let enable_val: u32 = 0;
+            let _ = RegSetValueExW(
+                h_key,
+                PCWSTR(HSTRING::from("ProxyEnable").as_ptr()),
+                None,
+                REG_DWORD,
+                Some(&enable_val.to_le_bytes()),
+            );
+        }
+
+        let _ = RegCloseKey(h_key);
+        let _ = notify_proxy_change();
+    }
+
+    Ok(())
+}
+
+pub fn get_system_proxy() -> Result<(bool, String, u16), String> {
+    use windows::Win32::System::Registry::*;
+    use windows::core::{HSTRING, PCWSTR};
+
+    let key_path = HSTRING::from(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings");
+    let mut h_key = Default::default();
+
+    unsafe {
+        let result = RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key_path.as_ptr()),
+            Some(0),
+            KEY_QUERY_VALUE,
+            &mut h_key,
+        );
+
+        if result.is_err() {
+            return Err("Failed to open registry key".to_string());
+        }
+
+        let mut enable_val: u32 = 0;
+        let mut size: u32 = 4;
+        let _ = RegQueryValueExW(
+            h_key,
+            PCWSTR(HSTRING::from("ProxyEnable").as_ptr()),
+            None,
+            None,
+            Some(&mut enable_val as *mut u32 as *mut u8),
+            Some(&mut size),
+        );
+
+        let mut server_buf = [0u16; 256];
+        let mut server_size: u32 = 512;
+        let _ = RegQueryValueExW(
+            h_key,
+            PCWSTR(HSTRING::from("ProxyServer").as_ptr()),
+            None,
+            None,
+            Some(server_buf.as_mut_ptr() as *mut u8),
+            Some(&mut server_size),
+        );
+
+        let _ = RegCloseKey(h_key);
+
+        let server_str = String::from_utf16_lossy(
+            &server_buf[..server_size as usize / 2]
+        );
+        let server_str = server_str.trim_end_matches('\0');
+
+        let (server, port) = if let Some(colon) = server_str.rfind(':') {
+            (server_str[..colon].to_string(), server_str[colon+1..].parse().unwrap_or(8080))
+        } else {
+            (server_str.to_string(), 8080)
+        };
+
+        Ok((enable_val != 0, server, port))
+    }
+}
+
+fn notify_proxy_change() -> Result<(), String> {
+    use windows::Win32::Networking::WinInet::*;
+    unsafe {
+        let options = INTERNET_OPTION_SETTINGS_CHANGED;
+        if InternetSetOptionW(None, options, None, 0).is_err() {
+            return Err("InternetSetOptionW failed".to_string());
+        }
+        let refresh = INTERNET_OPTION_REFRESH;
+        if InternetSetOptionW(None, refresh, None, 0).is_err() {
+            return Err("InternetSetOptionW refresh failed".to_string());
+        }
+    }
+    Ok(())
+}
+
+pub fn is_ca_certificate_installed() -> bool {
+    use windows::Win32::Security::Cryptography::*;
+    use windows::core::PCWSTR;
+
+    unsafe {
+        let store_name = windows::core::HSTRING::from("Root");
+        let h_store = match CertOpenStore(
+            CERT_STORE_PROV_SYSTEM_W,
+            CERT_QUERY_ENCODING_TYPE(0),
+            None,
+            CERT_OPEN_STORE_FLAGS(CERT_SYSTEM_STORE_CURRENT_USER as u32),
+            Some(PCWSTR(store_name.as_ptr()).as_ptr() as *const _),
+        ) {
+            Ok(s) => s,
+            Err(_) => {
+                tracing::debug!("[CertCheck] 无法打开证书存储");
+                return false;
+            }
+        };
+
+        let mut cert_context = CertEnumCertificatesInStore(h_store, None);
+
+        while !cert_context.is_null() {
+            let cert_der = std::slice::from_raw_parts(
+                (*cert_context).pbCertEncoded,
+                (*cert_context).cbCertEncoded as usize,
+            );
+
+            if cert_der.len() > 20 {
+                let cn_check = String::from_utf8_lossy(cert_der);
+                if cn_check.contains("FlowReveal") || cn_check.contains("flowreveal") {
+                    let _ = CertCloseStore(Some(h_store), 0);
+                    tracing::debug!("[CertCheck] 找到 FlowReveal CA 证书");
+                    return true;
+                }
+            }
+
+            cert_context = CertEnumCertificatesInStore(h_store, Some(cert_context));
+        }
+
+        let _ = CertCloseStore(Some(h_store), 0);
+        tracing::trace!("[CertCheck] 未找到 FlowReveal CA 证书");
+        false
+    }
+}
+
+pub fn uninstall_ca_certificate() -> Result<(), String> {
+    use windows::Win32::Security::Cryptography::*;
+    use windows::core::PCWSTR;
+
+    unsafe {
+        let store_name = windows::core::HSTRING::from("Root");
+        let h_store = CertOpenStore(
+            CERT_STORE_PROV_SYSTEM_W,
+            CERT_QUERY_ENCODING_TYPE(0),
+            None,
+            CERT_OPEN_STORE_FLAGS(CERT_SYSTEM_STORE_CURRENT_USER as u32),
+            Some(PCWSTR(store_name.as_ptr()).as_ptr() as *const _),
+        ).map_err(|e| format!("Failed to open certificate store: {}", e))?;
+
+        let mut found = false;
+        let mut cert_context = CertEnumCertificatesInStore(h_store, None);
+
+        while !cert_context.is_null() {
+            let cert_der = std::slice::from_raw_parts(
+                (*cert_context).pbCertEncoded,
+                (*cert_context).cbCertEncoded as usize,
+            );
+
+            if cert_der.len() > 20 {
+                let cn_check = String::from_utf8_lossy(cert_der);
+                if cn_check.contains("FlowReveal") || cn_check.contains("flowreveal") {
+                    let _ = CertDeleteCertificateFromStore(cert_context);
+                    found = true;
+                    break;
+                }
+            }
+
+            cert_context = CertEnumCertificatesInStore(h_store, Some(cert_context));
+        }
+
+        let _ = CertCloseStore(Some(h_store), 0);
+
+        if found {
+            tracing::info!("[CertInstall] CA 证书已从受信任根证书存储移除");
+        } else {
+            tracing::debug!("[CertInstall] 未找到 FlowReveal CA 证书");
+        }
+        Ok(())
     }
 }
