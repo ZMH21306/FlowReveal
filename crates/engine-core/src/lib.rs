@@ -13,3 +13,6 @@ pub mod replay;
 pub mod rules;
 pub mod search;
 pub mod stats;
+
+#[cfg(target_os = "windows")]
+pub mod divert;
