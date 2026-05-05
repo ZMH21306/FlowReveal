@@ -4,4 +4,4 @@ pub mod transparent_proxy;
 pub mod utils;
 
 pub use forward_proxy::ForwardProxy;
-pub use transparent_proxy::TransparentProxy;
+pub use transparent_proxy::TransparentProxyHandle;
