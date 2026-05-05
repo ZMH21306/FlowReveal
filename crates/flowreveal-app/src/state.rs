@@ -7,9 +7,18 @@ use engine_core::mitm::CaManager;
 use engine_core::platform_integration::windows::ProxySettings;
 use engine_core::rules::RuleEngine;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DiverterStatus {
+    NotAvailable,
+    Stopped,
+    Running,
+    Error,
+}
+
 pub struct ProxyHandles {
     pub forward_shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     pub transparent_shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    pub diverter_shutdown: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 pub struct AppState {
@@ -24,6 +33,9 @@ pub struct AppState {
     pub proxy_was_set: Arc<RwLock<bool>>,
     pub cert_was_installed: Arc<RwLock<bool>>,
     pub rule_engine: Arc<RuleEngine>,
+    pub diverter_status: Arc<RwLock<DiverterStatus>>,
+    pub is_elevated: Arc<RwLock<bool>>,
+    pub is_wifi: Arc<RwLock<bool>>,
 }
 
 impl AppState {
@@ -37,12 +49,16 @@ impl AppState {
             proxy_handles: Arc::new(Mutex::new(ProxyHandles {
                 forward_shutdown: None,
                 transparent_shutdown: None,
+                diverter_shutdown: None,
             })),
             ca_manager: Arc::new(RwLock::new(None)),
             original_proxy_settings: Arc::new(Mutex::new(None)),
             proxy_was_set: Arc::new(RwLock::new(false)),
             cert_was_installed: Arc::new(RwLock::new(false)),
             rule_engine: Arc::new(RuleEngine::new()),
+            diverter_status: Arc::new(RwLock::new(DiverterStatus::NotAvailable)),
+            is_elevated: Arc::new(RwLock::new(false)),
+            is_wifi: Arc::new(RwLock::new(false)),
         }
     }
 }
