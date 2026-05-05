@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { CaptureConfig, CertificateAuthority } from "../types";
+import type { CaptureConfig, CertificateAuthority, DiverterStatus } from "../types";
 
 export async function startCapture(config: CaptureConfig): Promise<void> {
   return invoke("start_capture", { config });
@@ -38,4 +38,20 @@ export async function exportHar(sessionIds: number[]): Promise<string> {
 
 export async function replayRequest(sessionId: number): Promise<string> {
   return invoke("replay_request", { sessionId });
+}
+
+export async function getDiverterStatus(): Promise<DiverterStatus> {
+  return invoke("get_diverter_status");
+}
+
+export async function checkElevated(): Promise<boolean> {
+  return invoke("is_elevated");
+}
+
+export async function checkWifiAdapter(): Promise<boolean> {
+  return invoke("is_wifi_adapter");
+}
+
+export async function requestElevation(): Promise<void> {
+  return invoke("request_elevation");
 }
