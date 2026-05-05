@@ -96,6 +96,13 @@ export function TrafficList() {
     }
   };
 
+  const handleFilterByProcess = (session: HttpSession) => {
+    const processName = session.request.process_name;
+    if (processName) {
+      setFilter({ searchText: processName });
+    }
+  };
+
   const handleBookmark = (session: HttpSession) => {
     toggleBookmark(session.id);
   };
@@ -145,6 +152,7 @@ export function TrafficList() {
                 const bodySize = (req.body_size || 0) + (resp?.body_size || 0);
                 const duration = resp?.duration_us ?? (resp ? (resp.timestamp - req.timestamp) : null);
                 const process = req.process_name || resp?.process_name || "";
+                const processId = req.process_id || resp?.process_id;
                 const isDecrypted = req.raw_tls_info != null;
                 const isHttps = req.scheme === "Https" || req.url?.startsWith("https://");
                 const isBookmarked = bookmarks.has(sid);
@@ -205,8 +213,17 @@ export function TrafficList() {
                     <span className="text-[var(--color-text-muted)] whitespace-nowrap">
                       {formatDuration(duration ?? null)}
                     </span>
-                    <span className="text-[var(--color-text-muted)] truncate">
-                      {process || "—"}
+                    <span
+                      className="text-[var(--color-text-muted)] truncate cursor-pointer hover:text-[var(--color-accent)] transition-colors"
+                      title={process && processId ? `${process} (${processId})` : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (process) {
+                          setFilter({ searchText: process });
+                        }
+                      }}
+                    >
+                      {process ? (processId ? `${process} (${processId})` : process) : "—"}
                     </span>
                   </div>
                 );
@@ -243,6 +260,7 @@ export function TrafficList() {
           onCopyCurl={handleCopyCurl}
           onFilterByHost={handleFilterByHost}
           onFilterByUrl={handleFilterByUrl}
+          onFilterByProcess={handleFilterByProcess}
           onBookmark={handleBookmark}
           onReplay={handleReplay}
           onOpenInBrowser={handleOpenInBrowser}
