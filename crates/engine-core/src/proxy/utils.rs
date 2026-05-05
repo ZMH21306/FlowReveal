@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
 static GLOBAL_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -65,4 +66,48 @@ pub(crate) fn is_hop_by_hop_header(name: &str) -> bool {
             | "upgrade"
             | "proxy-connection"
     )
+}
+
+pub(crate) async fn read_headers_from_buf<R: AsyncBufReadExt + Unpin>(
+    reader: &mut R,
+) -> Result<Vec<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut headers = Vec::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).await?;
+        let line = line.trim_end().to_string();
+        if line.is_empty() {
+            break;
+        }
+        if let Some(colon_pos) = line.find(':') {
+            let name = line[..colon_pos].trim().to_string();
+            let value = line[colon_pos + 1..].trim().to_string();
+            headers.push((name, value));
+        }
+    }
+    Ok(headers)
+}
+
+pub(crate) async fn read_body_from_buf<R: AsyncReadExt + Unpin>(
+    reader: &mut R,
+    content_length: usize,
+    max_body_size: usize,
+) -> Vec<u8> {
+    if content_length == 0 {
+        return Vec::new();
+    }
+    let to_read = content_length.min(max_body_size + 1);
+    let mut buf = vec![0u8; to_read];
+    reader.read_exact(&mut buf).await.ok();
+    if content_length > max_body_size + 1 {
+        let mut discard = [0u8; 4096];
+        let mut remaining = content_length - to_read;
+        while remaining > 0 {
+            let chunk = remaining.min(4096);
+            let n = reader.read(&mut discard[..chunk]).await.unwrap_or(0);
+            if n == 0 { break; }
+            remaining -= n;
+        }
+    }
+    buf
 }
