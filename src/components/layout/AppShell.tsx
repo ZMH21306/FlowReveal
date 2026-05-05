@@ -11,6 +11,7 @@ import { AiAssistant } from "../ai/AiAssistant";
 import { TrafficDiff } from "../tools/TrafficDiff";
 import { VulnScanner } from "../tools/VulnScanner";
 import { PluginManager } from "../tools/PluginManager";
+import { ElevationDialog } from "../common/ElevationDialog";
 
 export function AppShell() {
   const [showRules, setShowRules] = useState(false);
@@ -20,6 +21,7 @@ export function AppShell() {
   const [showDiff, setShowDiff] = useState(false);
   const [showVuln, setShowVuln] = useState(false);
   const [showPlugins, setShowPlugins] = useState(false);
+  const [showElevation, setShowElevation] = useState(false);
   const [leftWidth, setLeftWidth] = useState(50);
 
   const handleDividerDrag = useCallback(
@@ -88,6 +90,7 @@ export function AppShell() {
       {showDiff && <TrafficDiff onClose={() => setShowDiff(false)} />}
       {showVuln && <VulnScanner onClose={() => setShowVuln(false)} />}
       {showPlugins && <PluginManager onClose={() => setShowPlugins(false)} />}
+      <ElevationDialog open={showElevation} onClose={() => setShowElevation(false)} />
     </div>
   );
 }
