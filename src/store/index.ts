@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { HttpMessage, HttpSession } from "../types";
+import type { HttpMessage, HttpSession, DiverterStatus } from "../types";
 
 export type FilterMethod = "ALL" | "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "CONNECT";
 export type FilterScheme = "ALL" | "Http" | "Https";
@@ -25,6 +25,7 @@ export interface StoreState {
   sessionList: number[];
   selectedId: number | null;
   captureStatus: string;
+  captureMode: "Global" | "ProxyOnly";
   filter: TrafficFilter;
   filteredSessionList: number[];
   bookmarks: Set<number>;
@@ -37,11 +38,18 @@ export interface StoreState {
   activeSessions: number;
   bytesCaptured: number;
   decryptedCount: number;
+  diverterStatus: DiverterStatus;
+  isElevated: boolean;
+  isWifi: boolean;
 
   processMessage: (msg: HttpMessage) => void;
   selectRequest: (id: number | null) => void;
   clearRequests: () => void;
   setCaptureStatus: (status: string) => void;
+  setCaptureMode: (mode: "Global" | "ProxyOnly") => void;
+  setDiverterStatus: (status: DiverterStatus) => void;
+  setIsElevated: (elevated: boolean) => void;
+  setIsWifi: (wifi: boolean) => void;
   setFilter: (filter: Partial<TrafficFilter>) => void;
   resetFilter: () => void;
   setDslFilter: (dsl: string, filteredIds: number[]) => void;
@@ -135,6 +143,7 @@ export const useStore = create<StoreState>((set) => ({
   sessionList: [],
   selectedId: null,
   captureStatus: "Idle",
+  captureMode: "Global" as "Global" | "ProxyOnly",
   filter: { ...DEFAULT_FILTER },
   filteredSessionList: [],
   bookmarks: new Set<number>(),
@@ -146,6 +155,9 @@ export const useStore = create<StoreState>((set) => ({
   activeSessions: 0,
   bytesCaptured: 0,
   decryptedCount: 0,
+  diverterStatus: "NotAvailable" as DiverterStatus,
+  isElevated: false,
+  isWifi: false,
 
   processMessage: (msg: HttpMessage) =>
     set((state) => {
@@ -215,6 +227,10 @@ export const useStore = create<StoreState>((set) => ({
     });
   },
   setCaptureStatus: (status) => set({ captureStatus: status }),
+  setCaptureMode: (mode) => set({ captureMode: mode }),
+  setDiverterStatus: (status) => set({ diverterStatus: status }),
+  setIsElevated: (elevated) => set({ isElevated: elevated }),
+  setIsWifi: (wifi) => set({ isWifi: wifi }),
 
   setFilter: (partial) =>
     set((state) => {
