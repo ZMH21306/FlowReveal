@@ -14,12 +14,16 @@ pub struct CaptureConfig {
     pub mitm_bypass_hosts: Vec<String>,
     pub proxy_port: u16,
     pub transparent_proxy_port: u16,
+    pub capture_ports: Vec<u16>,
+    pub exclude_pids: Vec<u32>,
+    pub include_pids: Vec<u32>,
+    pub capture_localhost: bool,
 }
 
 impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
-            mode: CaptureMode::DualProxy,
+            mode: CaptureMode::Global,
             capture_http: true,
             capture_https: false,
             ports: vec![],
@@ -31,25 +35,25 @@ impl Default for CaptureConfig {
             mitm_bypass_hosts: vec![],
             proxy_port: 40960,
             transparent_proxy_port: 40961,
+            capture_ports: vec![80, 443],
+            exclude_pids: vec![],
+            include_pids: vec![],
+            capture_localhost: false,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CaptureMode {
-    ForwardProxy,
-    TransparentProxy,
-    DualProxy,
-    ApiHook,
+    Global,
+    ProxyOnly,
 }
 
 impl std::fmt::Display for CaptureMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CaptureMode::ForwardProxy => write!(f, "Forward Proxy"),
-            CaptureMode::TransparentProxy => write!(f, "Transparent Proxy"),
-            CaptureMode::DualProxy => write!(f, "Dual Proxy"),
-            CaptureMode::ApiHook => write!(f, "API Hook"),
+            CaptureMode::Global => write!(f, "Global"),
+            CaptureMode::ProxyOnly => write!(f, "Proxy Only"),
         }
     }
 }
