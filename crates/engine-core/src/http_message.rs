@@ -123,6 +123,52 @@ impl HttpMessage {
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
     }
+
+    pub fn builder() -> HttpMessageBuilder {
+        HttpMessageBuilder::default()
+    }
+
+    pub fn request(
+        session_id: u64,
+        protocol: HttpProtocol,
+        scheme: Scheme,
+        method: impl Into<String>,
+        url: impl Into<String>,
+        headers: Vec<(String, String)>,
+        timestamp: u64,
+    ) -> HttpMessageBuilder {
+        HttpMessageBuilder::default()
+            .id(session_id)
+            .session_id(session_id)
+            .direction(MessageDirection::Request)
+            .protocol(protocol)
+            .scheme(scheme)
+            .method(method)
+            .url(url)
+            .headers(headers)
+            .timestamp(timestamp)
+    }
+
+    pub fn response(
+        session_id: u64,
+        protocol: HttpProtocol,
+        scheme: Scheme,
+        status_code: u16,
+        headers: Vec<(String, String)>,
+        timestamp: u64,
+        duration_us: u64,
+    ) -> HttpMessageBuilder {
+        HttpMessageBuilder::default()
+            .id(session_id + 1)
+            .session_id(session_id)
+            .direction(MessageDirection::Response)
+            .protocol(protocol)
+            .scheme(scheme)
+            .status_code(status_code)
+            .headers(headers)
+            .timestamp(timestamp)
+            .duration_us(duration_us)
+    }
 }
 
 impl Default for HttpMessage {
@@ -155,6 +201,52 @@ impl Default for HttpMessage {
             raw_tls_info: None,
             stream_id: None,
         }
+    }
+}
+
+#[derive(Default)]
+pub struct HttpMessageBuilder {
+    inner: HttpMessage,
+}
+
+impl HttpMessageBuilder {
+    pub fn id(mut self, v: u64) -> Self { self.inner.id = v; self }
+    pub fn session_id(mut self, v: u64) -> Self { self.inner.session_id = v; self }
+    pub fn direction(mut self, v: MessageDirection) -> Self { self.inner.direction = v; self }
+    pub fn protocol(mut self, v: HttpProtocol) -> Self { self.inner.protocol = v; self }
+    pub fn scheme(mut self, v: Scheme) -> Self { self.inner.scheme = v; self }
+    pub fn method(mut self, v: impl Into<String>) -> Self { self.inner.method = Some(v.into()); self }
+    pub fn url(mut self, v: impl Into<String>) -> Self { self.inner.url = Some(v.into()); self }
+    pub fn status_code(mut self, v: u16) -> Self { self.inner.status_code = Some(v); self }
+    pub fn status_text(mut self, v: impl Into<String>) -> Self { self.inner.status_text = Some(v.into()); self }
+    pub fn headers(mut self, v: Vec<(String, String)>) -> Self { self.inner.headers = v; self }
+    pub fn body(mut self, v: Option<Vec<u8>>) -> Self { self.inner.body = v; self }
+    pub fn body_size(mut self, v: usize) -> Self { self.inner.body_size = v; self }
+    pub fn body_truncated(mut self, v: bool) -> Self { self.inner.body_truncated = v; self }
+    pub fn content_type(mut self, v: impl Into<String>) -> Self { self.inner.content_type = Some(v.into()); self }
+    pub fn process_name(mut self, v: impl Into<String>) -> Self { self.inner.process_name = Some(v.into()); self }
+    pub fn process_id(mut self, v: u32) -> Self { self.inner.process_id = Some(v); self }
+    pub fn process_path(mut self, v: impl Into<String>) -> Self { self.inner.process_path = Some(v.into()); self }
+    pub fn source_ip(mut self, v: impl Into<String>) -> Self { self.inner.source_ip = Some(v.into()); self }
+    pub fn dest_ip(mut self, v: impl Into<String>) -> Self { self.inner.dest_ip = Some(v.into()); self }
+    pub fn source_port(mut self, v: u16) -> Self { self.inner.source_port = Some(v); self }
+    pub fn dest_port(mut self, v: u16) -> Self { self.inner.dest_port = Some(v); self }
+    pub fn timestamp(mut self, v: u64) -> Self { self.inner.timestamp = v; self }
+    pub fn duration_us(mut self, v: u64) -> Self { self.inner.duration_us = Some(v); self }
+    pub fn raw_tls_info(mut self, v: TlsInfo) -> Self { self.inner.raw_tls_info = Some(v); self }
+    pub fn stream_id(mut self, v: u32) -> Self { self.inner.stream_id = Some(v); self }
+
+    pub fn process_info(mut self, info: Option<&crate::process_info::ProcessInfo>) -> Self {
+        if let Some(p) = info {
+            self.inner.process_name = Some(p.name.clone());
+            self.inner.process_id = Some(p.pid);
+            self.inner.process_path = p.path.clone();
+        }
+        self
+    }
+
+    pub fn build(self) -> HttpMessage {
+        self.inner
     }
 }
 
