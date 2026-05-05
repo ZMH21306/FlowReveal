@@ -158,11 +158,139 @@ fn get_process_info(pid: u32) -> Option<ProcessInfo> {
 
         let name = get_process_name(handle);
         let path = get_process_path(handle);
+        let username = get_process_username(handle);
+        let is_64_bit = get_process_is_64_bit(handle);
         let _ = windows::Win32::Foundation::CloseHandle(handle);
 
         match name {
-            Some(n) if !n.is_empty() => Some(ProcessInfo::new(pid, n).with_path(path.unwrap_or_default())),
+            Some(n) if !n.is_empty() => {
+                let mut info = ProcessInfo::new(pid, n).with_path(path.unwrap_or_default());
+                if let Some(u) = username {
+                    info = info.with_username(u);
+                }
+                if let Some(b) = is_64_bit {
+                    info = info.with_is_64_bit(b);
+                }
+                Some(info)
+            }
             _ => None
+        }
+    }
+}
+
+fn get_process_username(handle: windows::Win32::Foundation::HANDLE) -> Option<String> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+    use windows::Win32::System::Threading::OpenProcessToken;
+
+    unsafe {
+        let mut token_handle: HANDLE = HANDLE::default();
+        if OpenProcessToken(handle, TOKEN_QUERY, &mut token_handle).is_err() {
+            return None;
+        }
+
+        let mut return_length: u32 = 0;
+        let _ = GetTokenInformation(
+            token_handle,
+            TokenUser,
+            None,
+            0,
+            &mut return_length,
+        );
+
+        if return_length == 0 {
+            let _ = windows::Win32::Foundation::CloseHandle(token_handle);
+            return None;
+        }
+
+        let mut buffer = vec![0u8; return_length as usize];
+        if GetTokenInformation(
+            token_handle,
+            TokenUser,
+            Some(buffer.as_mut_ptr() as *mut _),
+            return_length,
+            &mut return_length,
+        ).is_err() {
+            let _ = windows::Win32::Foundation::CloseHandle(token_handle);
+            return None;
+        }
+
+        let _ = windows::Win32::Foundation::CloseHandle(token_handle);
+
+        let token_user = buffer.as_ptr() as *const TOKEN_USER;
+        let sid = (*token_user).User.Sid;
+
+        let mut name_len: u32 = 0;
+        let mut domain_len: u32 = 0;
+
+        unsafe fn lookup_account_sid(
+            sid: windows::Win32::Security::PSID,
+            name_buf: Option<*mut u16>,
+            name_len: *mut u32,
+            domain_buf: Option<*mut u16>,
+            domain_len: *mut u32,
+        ) -> bool {
+            #[link(name = "advapi32")]
+            unsafe extern "system" {
+                fn LookupAccountSidW(
+                    lpsystemname: usize,
+                    sid: windows::Win32::Security::PSID,
+                    name: *mut u16,
+                    cchname: *mut u32,
+                    referenceddomainname: *mut u16,
+                    cchreferenceddomainname: *mut u32,
+                    peuse: *mut u32,
+                ) -> i32;
+            }
+            let mut pe_use: u32 = 0;
+            unsafe {
+                LookupAccountSidW(
+                    0,
+                    sid,
+                    name_buf.unwrap_or(std::ptr::null_mut()),
+                    name_len,
+                    domain_buf.unwrap_or(std::ptr::null_mut()),
+                    domain_len,
+                    &mut pe_use,
+                ) != 0
+            }
+        }
+
+        if !lookup_account_sid(sid, None, &mut name_len, None, &mut domain_len) {
+            return None;
+        }
+
+        if name_len == 0 {
+            return None;
+        }
+
+        let mut name_buf = vec![0u16; name_len as usize];
+        let mut domain_buf = vec![0u16; domain_len as usize];
+
+        if !lookup_account_sid(sid, Some(name_buf.as_mut_ptr()), &mut name_len, Some(domain_buf.as_mut_ptr()), &mut domain_len) {
+            return None;
+        }
+
+        let domain = String::from_utf16_lossy(&domain_buf[..domain_len as usize]);
+        let name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+
+        if domain.is_empty() {
+            Some(name)
+        } else {
+            Some(format!("{}\\{}", domain, name))
+        }
+    }
+}
+
+fn get_process_is_64_bit(handle: windows::Win32::Foundation::HANDLE) -> Option<bool> {
+    use windows::Win32::System::Threading::IsWow64Process;
+
+    unsafe {
+        let mut is_wow64: i32 = 0;
+        if IsWow64Process(handle, &mut is_wow64 as *mut _ as *mut _).is_ok() {
+            Some(is_wow64 == 0)
+        } else {
+            None
         }
     }
 }
@@ -209,6 +337,40 @@ pub fn install_ca_certificate(cert_pem: &str) -> Result<(), String> {
 
     let der = pem_to_der(cert_pem).map_err(|e| e.to_string())?;
 
+    let fg_guard = std::thread::spawn(|| {
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        use windows::core::PCWSTR;
+
+        let class_name = windows::core::HSTRING::from("#32770");
+        for _ in 0..80 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            unsafe {
+                let hwnd = match FindWindowW(PCWSTR(class_name.as_ptr()), PCWSTR::null()) {
+                    Ok(h) if !h.is_invalid() => h,
+                    _ => continue,
+                };
+                if !IsWindowVisible(hwnd).as_bool() {
+                    continue;
+                }
+                let mut title = [0u16; 256];
+                let title_len = GetWindowTextW(hwnd, &mut title);
+                let title_str = String::from_utf16_lossy(&title[..title_len as usize]);
+                let lower = title_str.to_lowercase();
+                if lower.contains("certificate") || lower.contains("cert")
+                    || lower.contains("安全") || lower.contains("安装")
+                    || lower.contains("根证书") || lower.contains("root")
+                    || lower.contains("trust") || lower.contains("warning")
+                    || lower.contains("confirm")
+                {
+                    let _ = SetForegroundWindow(hwnd);
+                    let _ = BringWindowToTop(hwnd);
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                    break;
+                }
+            }
+        }
+    });
+
     unsafe {
         let store_name = windows::core::HSTRING::from("Root");
         let h_store = CertOpenStore(
@@ -234,8 +396,10 @@ pub fn install_ca_certificate(cert_pem: &str) -> Result<(), String> {
         }
 
         tracing::info!("[CertInstall] CA 证书已安装到受信任根证书存储");
-        Ok(())
     }
+
+    let _ = fg_guard.join();
+    Ok(())
 }
 
 pub fn remove_ca_certificate(cert_pem: &str) -> Result<(), String> {
