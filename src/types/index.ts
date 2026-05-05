@@ -1,7 +1,6 @@
 export type MessageDirection = "Request" | "Response";
 export type HttpProtocol = "HTTP1_1" | "HTTP2" | "WebSocket";
 export type Scheme = "Http" | "Https";
-export type CaptureMode = "ForwardProxy" | "TransparentProxy" | "DualProxy";
 export type CaptureStatus = "Idle" | "Running" | "Error";
 export type WsOpcode = "Continuation" | "Text" | "Binary" | "Close" | "Ping" | "Pong";
 
@@ -71,7 +70,7 @@ export interface WebSocketFrame {
 }
 
 export interface CaptureConfig {
-  mode: CaptureMode;
+  mode: "Global" | "ProxyOnly";
   capture_http: boolean;
   capture_https: boolean;
   ports: number[];
@@ -83,7 +82,13 @@ export interface CaptureConfig {
   mitm_bypass_hosts: string[];
   proxy_port: number;
   transparent_proxy_port: number;
+  capture_ports: number[];
+  exclude_pids: number[];
+  include_pids: number[];
+  capture_localhost: boolean;
 }
+
+export type DiverterStatus = "NotAvailable" | "Stopped" | "Running" | "Error";
 
 export interface EngineStats {
   total_sessions: number;
