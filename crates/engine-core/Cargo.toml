@@ -32,9 +32,11 @@ x509-parser = "0.16"
 windows = { version = "0.61", features = [
     "Win32_NetworkManagement_WindowsFilteringPlatform",
     "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_Networking_WinInet",
     "Win32_Security_Cryptography",
+    "Win32_Security_Authorization",
     "Win32_System_Threading",
     "Win32_System_Memory",
     "Win32_System_Diagnostics_ToolHelp",
@@ -44,5 +46,13 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_Security",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
 ] }
 winreg = "0.55"
+windivert = { version = "0.7.0-beta.4", optional = true, features = ["vendored"] }
+dashmap = "6"
+
+[features]
+default = []
+windivert = ["dep:windivert"]
