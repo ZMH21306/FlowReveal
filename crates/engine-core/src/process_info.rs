@@ -6,75 +6,25 @@ pub struct ProcessInfo {
     pub name: String,
     pub path: Option<String>,
     pub command_line: Option<String>,
-    pub icon_data: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionInfo {
-    pub local_addr: String,
-    pub local_port: u16,
-    pub remote_addr: String,
-    pub remote_port: u16,
-    pub protocol: TransportProtocol,
-    pub state: TcpState,
-    pub owning_pid: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TransportProtocol {
-    Tcp,
-    Udp,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TcpState {
-    Closed,
-    Listen,
-    SynSent,
-    SynReceived,
-    Established,
-    FinWait1,
-    FinWait2,
-    CloseWait,
-    Closing,
-    LastAck,
-    TimeWait,
-    DeleteTcb,
-}
-
-impl TcpState {
-    pub fn from_mib_state(state: u32) -> Self {
-        match state {
-            1 => TcpState::Closed,
-            2 => TcpState::Listen,
-            3 => TcpState::SynSent,
-            4 => TcpState::SynReceived,
-            5 => TcpState::Established,
-            6 => TcpState::FinWait1,
-            7 => TcpState::FinWait2,
-            8 => TcpState::CloseWait,
-            9 => TcpState::Closing,
-            10 => TcpState::LastAck,
-            11 => TcpState::TimeWait,
-            12 => TcpState::DeleteTcb,
-            _ => TcpState::Closed,
+impl ProcessInfo {
+    pub fn new(pid: u32, name: String) -> Self {
+        Self {
+            pid,
+            name,
+            path: None,
+            command_line: None,
         }
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessResolverConfig {
-    pub poll_interval_ms: u64,
-    pub cache_ttl_ms: u64,
-    pub max_cache_entries: usize,
-}
+    pub fn with_path(mut self, path: String) -> Self {
+        self.path = Some(path);
+        self
+    }
 
-impl Default for ProcessResolverConfig {
-    fn default() -> Self {
-        Self {
-            poll_interval_ms: 500,
-            cache_ttl_ms: 5000,
-            max_cache_entries: 4096,
-        }
+    pub fn with_command_line(mut self, command_line: String) -> Self {
+        self.command_line = Some(command_line);
+        self
     }
 }
