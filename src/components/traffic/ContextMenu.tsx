@@ -13,6 +13,7 @@ interface ContextMenuProps {
   onCopyCurl: (session: HttpSession) => void;
   onFilterByHost: (session: HttpSession) => void;
   onFilterByUrl: (session: HttpSession) => void;
+  onFilterByProcess: (session: HttpSession) => void;
   onBookmark: (session: HttpSession) => void;
   onReplay: (session: HttpSession) => void;
   onOpenInBrowser: (session: HttpSession) => void;
@@ -26,7 +27,7 @@ interface SubMenu {
 export function ContextMenu({
   x, y, session, onClose,
   onCopyUrl, onCopyResponseBody, onCopyRequestBody, onCopyHeaders, onCopyCurl,
-  onFilterByHost, onFilterByUrl,
+  onFilterByHost, onFilterByUrl, onFilterByProcess,
   onBookmark, onReplay, onOpenInBrowser,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -66,6 +67,9 @@ export function ContextMenu({
     items: [
       { label: "按此URL过滤", action: () => { onFilterByUrl(session); onClose(); } },
       { label: "按此域名过滤", action: () => { onFilterByHost(session); onClose(); } },
+      ...(session.request.process_name
+        ? [{ label: `按进程过滤 (${session.request.process_name})`, action: () => { onFilterByProcess(session); onClose(); } }]
+        : []),
     ],
   };
 
