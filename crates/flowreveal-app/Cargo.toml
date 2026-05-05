@@ -12,7 +12,6 @@ tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-process = "2"
-
 engine-core = { path = "../engine-core" }
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 serde = { workspace = true }
@@ -22,3 +21,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "time"
 tracing-appender = "0.2"
 dirs = "6"
 ctrlc = "3"
+
+[features]
+default = ["windivert"]
+windivert = ["engine-core/windivert"]
