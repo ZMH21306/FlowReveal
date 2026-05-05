@@ -5,18 +5,17 @@ use hyper::Request;
 use hyper_util::rt::TokioIo;
 use http_body_util::{BodyExt, Full};
 use bytes::Bytes;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::capture_config::CaptureConfig;
 use crate::engine_error::EngineError;
-use crate::http_message::{HttpMessage, HttpProtocol, MessageDirection, Scheme};
+use crate::http_message::{HttpMessage, HttpProtocol, Scheme};
 use crate::mitm::{CaManager, MitmConfig};
 use crate::proxy::mitm_proxy;
-use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header, next_session_id};
+use crate::proxy::utils::{extract_header, now_us, parse_host_port, truncate_body, is_hop_by_hop_header, next_session_id, read_headers_from_buf, read_body_from_buf};
 use crate::rules::{RuleEngine, RuleExecutionResult, executor::RuleExecutor};
-
 
 pub struct ForwardProxyHandle {
     pub shutdown_tx: oneshot::Sender<()>,
@@ -37,8 +36,7 @@ impl ForwardProxy {
         let max_body_size = config.max_body_size;
         let capture_https = config.capture_https;
 
-        tracing::info!("[ForwardProxy] 初始化中 | 端口={} | HTTPS解密={} | 最大Body={}",
-            port, capture_https, max_body_size);
+        tracing::info!(port, capture_https, max_body_size, "[ForwardProxy] 初始化中");
 
         let mitm_config = MitmConfig {
             enabled: capture_https,
@@ -55,7 +53,7 @@ impl ForwardProxy {
                     Some(Arc::new(m))
                 }
                 Err(e) => {
-                    tracing::error!("[ForwardProxy] CA 管理器初始化失败: {} - HTTPS 抓取已禁用", e);
+                    tracing::error!(error = %e, "[ForwardProxy] CA 管理器初始化失败，HTTPS 抓取已禁用");
                     None
                 }
             }
@@ -65,10 +63,10 @@ impl ForwardProxy {
         };
 
         let listener = TcpListener::bind(addr).await.map_err(|e| {
-            tracing::error!("[ForwardProxy] 端口 {} 绑定失败: {}", port, e);
+            tracing::error!(port, error = %e, "[ForwardProxy] 端口绑定失败");
             e
         })?;
-        tracing::info!("[ForwardProxy] 监听已启动 {}", addr);
+        tracing::info!(%addr, "[ForwardProxy] 监听已启动");
 
         let ca_manager_clone = ca_manager.clone();
         let mitm_config_clone = mitm_config.clone();
@@ -80,7 +78,7 @@ impl ForwardProxy {
                 let accept_result = tokio::select! {
                     result = listener.accept() => result,
                     _ = &mut shutdown_rx => {
-                        tracing::info!("[ForwardProxy] 收到关闭信号，已处理 {} 个连接", conn_count);
+                        tracing::info!(conn_count, "[ForwardProxy] 收到关闭信号");
                         return;
                     }
                 };
@@ -88,9 +86,7 @@ impl ForwardProxy {
                 match accept_result {
                     Ok((stream, client_addr)) => {
                         conn_count += 1;
-                        if conn_count <= 5 || conn_count % 50 == 0 {
-                            tracing::info!("[ForwardProxy] 新连接 #{} 来自 {}", conn_count, client_addr);
-                        }
+                        tracing::debug!(conn_count, %client_addr, "[ForwardProxy] 新连接");
                         let engine_tx = engine_tx.clone();
                         let ca_manager = ca_manager_clone.clone();
                         let mitm_config = mitm_config_clone.clone();
@@ -99,12 +95,12 @@ impl ForwardProxy {
                             if let Err(e) = handle_raw_connection(
                                 stream, client_addr, engine_tx, max_body_size, ca_manager, &mitm_config, rule_engine,
                             ).await {
-                                tracing::debug!("[ForwardProxy] 连接处理错误 {}: {}", client_addr, e);
+                                tracing::debug!(%client_addr, error = %e, "[ForwardProxy] 连接处理错误");
                             }
                         });
                     }
                     Err(e) => {
-                        tracing::error!("[ForwardProxy] Accept 错误: {}", e);
+                        tracing::error!(error = %e, "[ForwardProxy] Accept 错误");
                     }
                 }
             }
@@ -152,7 +148,7 @@ async fn handle_raw_connection(
     let method = parts[0];
     let request_target = parts[1];
 
-    let raw_headers = read_headers(&mut reader).await?;
+    let raw_headers = read_headers_from_buf(&mut reader).await?;
 
     let source_ip = client_addr.ip().to_string();
     let source_port = client_addr.port();
@@ -160,12 +156,10 @@ async fn handle_raw_connection(
     let session_id = next_session_id();
 
     let proc_info = crate::platform_integration::windows::find_process_by_connection(&source_ip, source_port);
-    if let Some(ref p) = proc_info {
-        tracing::debug!("[ForwardProxy] 进程信息: PID={} | name={} | port={}", p.pid, p.name, source_port);
-    }
+    tracing::debug!(source_ip, source_port, pid = proc_info.as_ref().map(|p| p.pid), "[ForwardProxy] 进程查找");
 
     if method.eq_ignore_ascii_case("CONNECT") {
-        tracing::info!("[ForwardProxy] CONNECT 请求 | target={} | source={}", request_target, source_ip);
+        tracing::info!(target = request_target, source = %source_ip, "[ForwardProxy] CONNECT 请求");
         if let Some(ref ca) = ca_manager {
             let client_stream = reader.into_inner();
             mitm_proxy::handle_mitm_connect(
@@ -173,61 +167,19 @@ async fn handle_raw_connection(
                 engine_tx, ca.clone(), mitm_config, max_body_size, rule_engine, proc_info.as_ref(),
             ).await
         } else {
-            tracing::debug!("[ForwardProxy] CONNECT 隧道模式（无 MITM）| target={}", request_target);
+            tracing::debug!(target = request_target, "[ForwardProxy] CONNECT 隧道模式（无 MITM）");
             handle_connect_tunnel(
                 reader, session_id, request_target, &raw_headers,
                 &source_ip, timestamp, engine_tx, proc_info.as_ref(),
             ).await
         }
     } else {
-        tracing::info!("[ForwardProxy] HTTP 请求 | method={} | target={} | source={}", method, request_target, source_ip);
+        tracing::info!(method, target = request_target, source = %source_ip, "[ForwardProxy] HTTP 请求");
         handle_http_request(
             reader, session_id, method, request_target, raw_headers,
             source_ip, timestamp, engine_tx, max_body_size, rule_engine, proc_info.as_ref(),
         ).await
     }
-}
-
-async fn read_headers<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<Vec<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut headers = Vec::new();
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line).await?;
-        let line = line.trim_end().to_string();
-        if line.is_empty() {
-            break;
-        }
-        if let Some(colon_pos) = line.find(':') {
-            let name = line[..colon_pos].trim().to_string();
-            let value = line[colon_pos + 1..].trim().to_string();
-            headers.push((name, value));
-        }
-    }
-    Ok(headers)
-}
-
-async fn read_body<R: AsyncReadExt + Unpin>(
-    reader: &mut R,
-    content_length: usize,
-    max_body_size: usize,
-) -> Vec<u8> {
-    if content_length == 0 {
-        return Vec::new();
-    }
-    let to_read = content_length.min(max_body_size + 1);
-    let mut buf = vec![0u8; to_read];
-    reader.read_exact(&mut buf).await.ok();
-    if content_length > max_body_size + 1 {
-        let mut discard = [0u8; 4096];
-        let mut remaining = content_length - to_read;
-        while remaining > 0 {
-            let chunk = remaining.min(4096);
-            let n = reader.read(&mut discard[..chunk]).await.unwrap_or(0);
-            if n == 0 { break; }
-            remaining -= n;
-        }
-    }
-    buf
 }
 
 async fn handle_connect_tunnel(
@@ -238,11 +190,16 @@ async fn handle_connect_tunnel(
     source_ip: &str,
     timestamp: u64,
     engine_tx: mpsc::Sender<HttpMessage>,
-    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
+    proc_info: Option<&crate::process_info::ProcessInfo>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (host, port) = parse_host_port(request_target, 443);
 
-    let req_msg = build_connect_request(session_id, request_target, req_headers, source_ip, &host, port, timestamp, proc_info);
+    let req_msg = HttpMessage::request(session_id, HttpProtocol::HTTP1_1, Scheme::Https, "CONNECT", request_target, req_headers.to_vec(), timestamp)
+        .process_info(proc_info)
+        .source_ip(source_ip)
+        .dest_ip(&host)
+        .dest_port(port)
+        .build();
     let _ = engine_tx.send(req_msg).await;
 
     let start = std::time::Instant::now();
@@ -250,7 +207,7 @@ async fn handle_connect_tunnel(
     let remote_stream = match tokio::net::TcpStream::connect((host.as_str(), port)).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("[ForwardProxy] CONNECT: 连接 {}:{} 失败 - {}", host, port, e);
+            tracing::warn!(host, port, error = %e, "[ForwardProxy] CONNECT: 连接上游失败");
             let mut stream = reader.into_inner();
             let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
             return Ok(());
@@ -259,23 +216,28 @@ async fn handle_connect_tunnel(
 
     let duration_us = start.elapsed().as_micros() as u64;
 
-    let resp_msg = build_tunnel_response(session_id, &host, source_ip, port, duration_us);
+    let resp_msg = HttpMessage::response(session_id, HttpProtocol::HTTP1_1, Scheme::Https, 200, vec![], now_us(), duration_us)
+        .status_text("Connection Established")
+        .source_ip(&host)
+        .dest_ip(source_ip)
+        .source_port(port)
+        .build();
     let _ = engine_tx.send(resp_msg).await;
 
     let mut client_stream = reader.into_inner();
     let _ = client_stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
 
-    tracing::debug!("[ForwardProxy] CONNECT 隧道建立 {}:{}", host, port);
+    tracing::debug!(host, port, "[ForwardProxy] CONNECT 隧道建立");
 
     let (mut cr, mut cw) = client_stream.split();
     let (mut rr, mut rw) = tokio::io::split(remote_stream);
 
     tokio::select! {
         r = tokio::io::copy(&mut cr, &mut rw) => {
-            if let Err(e) = r { tracing::debug!("[ForwardProxy] 隧道 c->r 错误: {}", e); }
+            if let Err(e) = r { tracing::trace!(error = %e, "[ForwardProxy] 隧道 c->r 关闭"); }
         }
         r = tokio::io::copy(&mut rr, &mut cw) => {
-            if let Err(e) = r { tracing::debug!("[ForwardProxy] 隧道 r->c 错误: {}", e); }
+            if let Err(e) = r { tracing::trace!(error = %e, "[ForwardProxy] 隧道 r->c 关闭"); }
         }
     }
 
@@ -294,7 +256,7 @@ async fn handle_http_request(
     engine_tx: mpsc::Sender<HttpMessage>,
     max_body_size: usize,
     rule_engine: Arc<RuleEngine>,
-    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
+    proc_info: Option<&crate::process_info::ProcessInfo>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let host = extract_header(&req_headers, "host").unwrap_or_else(|| "unknown".to_string());
     let forward_url = if request_target.starts_with("http://") || request_target.starts_with("https://") {
@@ -307,85 +269,43 @@ async fn handle_http_request(
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
-    let req_body_bytes = read_body(&mut reader, content_length, max_body_size).await;
+    let req_body_bytes = read_body_from_buf(&mut reader, content_length, max_body_size).await;
     let (req_body_captured, req_body_truncated) = truncate_body(&req_body_bytes, max_body_size);
 
-    let req_msg = HttpMessage {
-        id: session_id,
-        session_id,
-        direction: MessageDirection::Request,
-        protocol: HttpProtocol::HTTP1_1,
-        scheme: Scheme::Http,
-        method: Some(method.to_string()),
-        url: Some(forward_url.clone()),
-        status_code: None,
-        status_text: None,
-        headers: req_headers.clone(),
-        body: req_body_captured,
-        body_size: content_length,
-        body_truncated: req_body_truncated,
-        content_type: extract_header(&req_headers, "content-type"),
-        process_name: proc_info.map(|p| p.name.clone()),
-        process_id: proc_info.map(|p| p.pid),
-        process_path: proc_info.and_then(|p| p.path.clone()),
-        source_ip: Some(source_ip.clone()),
-        dest_ip: Some(host.clone()),
-        source_port: None,
-        dest_port: None,
-        timestamp,
-        duration_us: None,
-        cookies: vec![],
-        raw_tls_info: None,
-        stream_id: None,
-    };
+    let req_msg = HttpMessage::request(session_id, HttpProtocol::HTTP1_1, Scheme::Http, method, &forward_url, req_headers.clone(), timestamp)
+        .process_info(proc_info)
+        .source_ip(&source_ip)
+        .dest_ip(&host)
+        .body(req_body_captured)
+        .body_size(content_length)
+        .body_truncated(req_body_truncated)
+        .content_type(extract_header(&req_headers, "content-type").unwrap_or_default())
+        .build();
 
-    // === 规则检查点（请求阶段） ===
     if let Some(result) = rule_engine.apply(&req_msg, None).await {
         match result {
             RuleExecutionResult::AutoReply { status_code, status_text, headers, body, delay_ms } => {
-                tracing::info!("[ForwardProxy] 自动回复规则触发 | status={} | delay={}ms", status_code, delay_ms);
+                tracing::info!(status_code, delay_ms, "[ForwardProxy] 自动回复规则触发");
                 let _ = engine_tx.send(req_msg).await;
                 if delay_ms > 0 {
                     tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                 }
-                let mock_resp_msg = HttpMessage {
-                    id: session_id + 1,
-                    session_id,
-                    direction: MessageDirection::Response,
-                    protocol: HttpProtocol::HTTP1_1,
-                    scheme: Scheme::Http,
-                    method: None,
-                    url: None,
-                    status_code: Some(status_code),
-                    status_text: Some(status_text.clone()),
-                    headers: headers.clone(),
-                    body: if body.is_empty() { None } else { Some(body.clone()) },
-                    body_size: body.len(),
-                    body_truncated: false,
-                    content_type: extract_header(&headers, "content-type"),
-                    process_name: None,
-                    process_id: None,
-                    process_path: None,
-                    source_ip: Some(host.clone()),
-                    dest_ip: Some(source_ip.clone()),
-                    source_port: None,
-                    dest_port: None,
-                    timestamp: now_us(),
-                    duration_us: Some(0),
-                    cookies: vec![],
-                    raw_tls_info: None,
-                    stream_id: None,
-                };
-                let _ = engine_tx.send(mock_resp_msg).await;
+                let mock_resp = HttpMessage::response(session_id, HttpProtocol::HTTP1_1, Scheme::Http, status_code, headers.clone(), now_us(), 0)
+                    .status_text(&status_text)
+                    .body(if body.is_empty() { None } else { Some(body.clone()) })
+                    .body_size(body.len())
+                    .content_type(extract_header(&headers, "content-type").unwrap_or_default())
+                    .source_ip(&host)
+                    .dest_ip(&source_ip)
+                    .build();
+                let _ = engine_tx.send(mock_resp).await;
                 let mut client_stream = reader.into_inner();
                 write_response_to_client(&mut client_stream, status_code, &Some(status_text), &headers, &body).await?;
                 return Ok(());
             }
             RuleExecutionResult::HeaderModified { request_actions, response_actions } => {
-                tracing::info!("[ForwardProxy] 消息头修改规则触发 | 请求动作={} 响应动作={}", request_actions.len(), response_actions.len());
+                tracing::info!(req_actions = request_actions.len(), resp_actions = response_actions.len(), "[ForwardProxy] 消息头修改规则触发");
                 RuleExecutor::apply_header_actions(&mut req_headers, &request_actions);
-                // 继续正常流程，但使用修改后的请求头
-                // response_actions 将在响应阶段应用
                 let _ = engine_tx.send(req_msg).await;
                 return handle_http_request_forward(
                     reader, session_id, method, request_target, req_headers,
@@ -401,41 +321,17 @@ async fn handle_http_request(
                     crate::rules::RedirectType::Temporary307 => 307,
                     crate::rules::RedirectType::Permanent308 => 308,
                 };
-                tracing::info!("[ForwardProxy] 重定向规则触发 | {} -> {} | status={}", forward_url, final_url, redirect_code);
+                tracing::info!(from = %forward_url, to = %final_url, redirect_code, "[ForwardProxy] 重定向规则触发");
                 let _ = engine_tx.send(req_msg).await;
                 let redirect_headers = vec![
                     ("Location".to_string(), final_url.clone()),
                     ("Content-Length".to_string(), "0".to_string()),
                 ];
-                let redirect_resp_msg = HttpMessage {
-                    id: session_id + 1,
-                    session_id,
-                    direction: MessageDirection::Response,
-                    protocol: HttpProtocol::HTTP1_1,
-                    scheme: Scheme::Http,
-                    method: None,
-                    url: None,
-                    status_code: Some(redirect_code),
-                    status_text: None,
-                    headers: redirect_headers.clone(),
-                    body: None,
-                    body_size: 0,
-                    body_truncated: false,
-                    content_type: None,
-                    process_name: None,
-                    process_id: None,
-                    process_path: None,
-                    source_ip: Some(host.clone()),
-                    dest_ip: Some(source_ip.clone()),
-                    source_port: None,
-                    dest_port: None,
-                    timestamp: now_us(),
-                    duration_us: Some(0),
-                    cookies: vec![],
-                    raw_tls_info: None,
-                    stream_id: None,
-                };
-                let _ = engine_tx.send(redirect_resp_msg).await;
+                let redirect_resp = HttpMessage::response(session_id, HttpProtocol::HTTP1_1, Scheme::Http, redirect_code, redirect_headers.clone(), now_us(), 0)
+                    .source_ip(&host)
+                    .dest_ip(&source_ip)
+                    .build();
+                let _ = engine_tx.send(redirect_resp).await;
                 let mut client_stream = reader.into_inner();
                 write_response_to_client(&mut client_stream, redirect_code, &None, &redirect_headers, &[]).await?;
                 return Ok(());
@@ -479,9 +375,10 @@ async fn handle_http_request_forward(
     let upstream_stream = match tokio::net::TcpStream::connect((forward_host.as_str(), port)).await {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("[ForwardProxy] 连接上游 {}:{} 失败: {}", forward_host, port, e);
+            tracing::warn!(host = %forward_host, port, error = %e, "[ForwardProxy] 连接上游失败");
             let mut client_stream = reader.into_inner();
-            let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\nFailed to connect to upstream: {}", e.to_string().len(), e);
+            let body = format!("Failed to connect to upstream: {}", e);
+            let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
             let _ = client_stream.write_all(resp.as_bytes()).await;
             return Ok(());
         }
@@ -492,9 +389,10 @@ async fn handle_http_request_forward(
     let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::warn!("[ForwardProxy] 上游握手失败: {}", e);
+            tracing::warn!(error = %e, "[ForwardProxy] 上游握手失败");
             let mut client_stream = reader.into_inner();
-            let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\nUpstream handshake failed: {}", e.to_string().len(), e);
+            let body = format!("Upstream handshake failed: {}", e);
+            let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
             let _ = client_stream.write_all(resp.as_bytes()).await;
             return Ok(());
         }
@@ -502,18 +400,19 @@ async fn handle_http_request_forward(
 
     tokio::spawn(async move {
         if let Err(e) = conn.await {
-            tracing::debug!("[ForwardProxy] 上游连接错误: {}", e);
+            tracing::trace!(error = %e, "[ForwardProxy] 上游连接关闭");
         }
     });
 
-    let forward_req = build_forward_request(method, &forward_uri, &req_headers, &forward_host, req_body_bytes);
+    let forward_req = build_forward_request(method, &forward_uri, &req_headers, &forward_host, req_body_bytes)?;
 
     let upstream_resp = match sender.send_request(forward_req).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("[ForwardProxy] 转发请求失败: {}", e);
+            tracing::warn!(error = %e, "[ForwardProxy] 转发请求失败");
             let mut client_stream = reader.into_inner();
-            let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\nUpstream request failed: {}", e.to_string().len(), e);
+            let body = format!("Upstream request failed: {}", e);
+            let resp = format!("HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
             let _ = client_stream.write_all(resp.as_bytes()).await;
             return Ok(());
         }
@@ -536,40 +435,21 @@ async fn handle_http_request_forward(
     let resp_body_size = resp_body_bytes.len();
     let (resp_body_captured, resp_body_truncated) = truncate_body(&resp_body_bytes, max_body_size);
 
-    // === 规则检查点（响应阶段） ===
     if !pending_response_actions.is_empty() {
         RuleExecutor::apply_header_actions(&mut resp_headers, &pending_response_actions);
-        tracing::info!("[ForwardProxy] 响应头修改规则应用 | 修改了 {} 个动作", pending_response_actions.len());
+        tracing::debug!(actions = pending_response_actions.len(), "[ForwardProxy] 响应头修改规则应用");
     }
 
-    let resp_msg = HttpMessage {
-        id: session_id + 1,
-        session_id,
-        direction: MessageDirection::Response,
-        protocol: HttpProtocol::HTTP1_1,
-        scheme: Scheme::Http,
-        method: None,
-        url: None,
-        status_code: Some(status_code),
-        status_text: status_reason.clone(),
-        headers: resp_headers.clone(),
-        body: resp_body_captured,
-        body_size: resp_body_size,
-        body_truncated: resp_body_truncated,
-        content_type: extract_header(&resp_headers, "content-type"),
-        process_name: None,
-        process_id: None,
-        process_path: None,
-        source_ip: Some(forward_host.clone()),
-        dest_ip: Some(source_ip.clone()),
-        source_port: Some(port),
-        dest_port: None,
-        timestamp: now_us(),
-        duration_us: Some(duration_us),
-        cookies: vec![],
-        raw_tls_info: None,
-        stream_id: None,
-    };
+    let resp_msg = HttpMessage::response(session_id, HttpProtocol::HTTP1_1, Scheme::Http, status_code, resp_headers.clone(), now_us(), duration_us)
+        .status_text(status_reason.clone().unwrap_or_default())
+        .body(resp_body_captured)
+        .body_size(resp_body_size)
+        .body_truncated(resp_body_truncated)
+        .content_type(extract_header(&resp_headers, "content-type").unwrap_or_default())
+        .source_ip(&forward_host)
+        .dest_ip(&source_ip)
+        .source_port(port)
+        .build();
 
     let _ = engine_tx.send(resp_msg).await;
 
@@ -579,90 +459,13 @@ async fn handle_http_request_forward(
     Ok(())
 }
 
-fn build_connect_request(
-    session_id: u64,
-    request_target: &str,
-    req_headers: &[(String, String)],
-    source_ip: &str,
-    host: &str,
-    port: u16,
-    timestamp: u64,
-    proc_info: Option<&crate::platform_integration::windows::ProcessInfo>,
-) -> HttpMessage {
-    HttpMessage {
-        id: session_id,
-        session_id,
-        direction: MessageDirection::Request,
-        protocol: HttpProtocol::HTTP1_1,
-        scheme: Scheme::Https,
-        method: Some("CONNECT".to_string()),
-        url: Some(request_target.to_string()),
-        status_code: None,
-        status_text: None,
-        headers: req_headers.to_vec(),
-        body: None,
-        body_size: 0,
-        body_truncated: false,
-        content_type: None,
-        process_name: proc_info.map(|p| p.name.clone()),
-        process_id: proc_info.map(|p| p.pid),
-        process_path: proc_info.and_then(|p| p.path.clone()),
-        source_ip: Some(source_ip.to_string()),
-        dest_ip: Some(host.to_string()),
-        source_port: None,
-        dest_port: Some(port),
-        timestamp,
-        duration_us: None,
-        cookies: vec![],
-        raw_tls_info: None,
-        stream_id: None,
-    }
-}
-
-fn build_tunnel_response(
-    session_id: u64,
-    host: &str,
-    source_ip: &str,
-    port: u16,
-    duration_us: u64,
-) -> HttpMessage {
-    HttpMessage {
-        id: session_id + 1,
-        session_id,
-        direction: MessageDirection::Response,
-        protocol: HttpProtocol::HTTP1_1,
-        scheme: Scheme::Https,
-        method: None,
-        url: None,
-        status_code: Some(200),
-        status_text: Some("Connection Established".to_string()),
-        headers: vec![],
-        body: None,
-        body_size: 0,
-        body_truncated: false,
-        content_type: None,
-        process_name: None,
-        process_id: None,
-        process_path: None,
-        source_ip: Some(host.to_string()),
-        dest_ip: Some(source_ip.to_string()),
-        source_port: Some(port),
-        dest_port: None,
-        timestamp: now_us(),
-        duration_us: Some(duration_us),
-        cookies: vec![],
-        raw_tls_info: None,
-        stream_id: None,
-    }
-}
-
 fn build_forward_request(
     method: &str,
     uri: &hyper::Uri,
     req_headers: &[(String, String)],
     forward_host: &str,
     body: Vec<u8>,
-) -> Request<Full<Bytes>> {
+) -> Result<Request<Full<Bytes>>, Box<dyn std::error::Error + Send + Sync>> {
     let mut builder = Request::builder().method(method).uri(uri);
 
     for (key, value) in req_headers {
@@ -673,7 +476,7 @@ fn build_forward_request(
     builder = builder.header("Host", forward_host);
     builder = builder.header("Connection", "close");
 
-    builder.body(Full::new(Bytes::from(body))).unwrap()
+    Ok(builder.body(Full::new(Bytes::from(body)))?)
 }
 
 async fn write_response_to_client(
